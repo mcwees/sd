@@ -14,12 +14,15 @@ use DBD::Pg;
 use DateTime;
 use open qw( :std :encoding(UTF-8) );
 use vars qw($dbh $auth_user $sth $q $s $quot_name %user_data %html_blocks
-	    %form_data @qry);
+	    %form_data @qry $chat_link);
 
+$chat_link = "http://dss.complete.ru:2223/chat";
 %html_blocks = (
         auth => '',
         info => '',
 	menu => '',
+	caseinfo => '',
+	querytime => '',
         main => '<h2>Вы не зарегистрированы в системе.</h2>',
 );
 
@@ -129,11 +132,25 @@ sub getenv() {
 
 ########################################################################
 sub checkuser(){
-# Validation of logged user
- use vars qw($ret);
+# Validation of login user
+ use vars qw($ret $s_count);
  $ret = 0;
  $auth_user = lc $ENV{REMOTE_USER};
  if(!defined $form_data{sess_id}){
+  # Firstly need check session valid (found in DB)
+  # ..
+  $quot_name = "'" . $form_data{sess_id} . "'";
+  $q =<<CHECKSESS;
+SELECT count(*) from get_sess_owner($quot_name) WHERE NOT is_expire;
+CHECKSESS
+  $sth = &sql_exec($q);
+  while ($s = $sth->fetchrow_hashref){
+	$s_count = $s->{count}
+  }
+  if($s_count == 1){ # current session is valid
+  }else{ # current session isn't valid
+  }
+  
   $quot_name = "'" . $auth_user . "'";
   $q =<<GETUSER;
 SELECT id, name, email, role FROM sd_users
@@ -160,7 +177,7 @@ GETUSER
    }
   }
  } else {
-  # User already authorized and session found
+  # User has been authorized and unchecked(!) session exists
   $quot_name = "'" . $form_data{sess_id} . "'";
   $user_data{session} = $form_data{sess_id};
   $q =<<GETINFO;
@@ -270,7 +287,7 @@ THEAD
     if(!defined $s->{$_}){ $s->{$_} = '' }
   }
   $out .= "<tr><td class=bot>";
-  $out .= "<a href=chat.pl?sess_id=$sid&case_id=" . $s->{case_id} . ">";
+  $out .= "<a href=$ENV{SCRIPT_NAME}?sess_id=$sid&act=casechat&case_id=" . $s->{case_id} . ">";
   $out .= "$s->{case_name}</a></td>\n";
   $out .= "<td class=bot>$s->{ext_name}</td>";
   $out .= "<td class=bot>$s->{last_up}</td>";
@@ -453,6 +470,84 @@ CREAT1
  return $out;
 }
 
+sub get_caseinfo() {
+#
+# Get case info
+#
+ use vars qw($q $qsess $out $cust_f $c_found);
+ $c_found = 0;
+ if(defined $form_data{case_id} and $form_data{case_id} > 0){
+  $cust_f = "";
+  if(defined $user_data{role} and $user_data{role} eq "customer"){
+    $cust_f = "AND customer = '" . $user_data{name} . "'";
+  }
+  $q =<<CFOUND;
+SELECT count(*) FROM caseinfo WHERE case_id = $form_data{case_id} $cust_f
+CFOUND
+  $sth = &sql_exec($q);
+  while ($s = $sth->fetchrow_hashref){
+    $c_found = $s->{count} || 0
+  }
+  if($c_found == 1){
+  $q =<<CASE;
+SELECT case_id, case_name, sn, pn, description, last_up::date,
+       customer, cust_city, begin_supp, end_supp, sla,
+       creator, status, message, ext_name
+  FROM caseinfo
+  WHERE case_id = $form_data{case_id} $cust_f
+CASE
+  $sth = &sql_exec($q);
+  $out = "<table class=invis>\n";
+  while ($s = $sth->fetchrow_hashref){
+   foreach("creator", "customer", "cust_city", "ext_name"){
+	if(!defined $s->{$_}){$s->{$_} = ""}
+   }
+   $out .= "<tr><th colspan=2>$s->{case_name}</th></tr>\n";
+   $out .= "<tr><th>Имя во внешней<br>системе</th>";
+     $out .= "<td>$s->{ext_name}</td>\n";
+   $out .= "<tr><th>Заказчик</th>";
+   $out .= "<td>$s->{customer}, $s->{cust_city}</td></tr>\n";
+   $out .= "<tr><th>Оборудование</th>";
+   $out .= "<td><b>$s->{sn}, $s->{pn}</b><br>\n";
+   $out .= "$s->{description}</td></tr>\n";
+   $out .= "<tr><th>SLA</th><td>$s->{sla}</td></tr>\n";
+   $out .= "<tr><th>Статус</th><td>$s->{status}</td></tr>\n";
+   $out .= "<tr><th>Владелец</th><td>$s->{creator}</td></tr>\n";
+  }
+  $out .= "</table>\n";
+  }else{
+   $out = "<p>Case $form_data{case_id} not accessible</p>";
+  }
+ }else{
+  $out = "<p>Parameter case_id not defined</p>";
+ }
+ return $c_found, $out
+}
+
+sub get_casechat(){
+# Chat with some case
+ use vars qw($case_found $html $out $url);
+ ($case_found, $html) = &get_caseinfo;
+ $out = $html;
+ $url = "sess_id=$form_data{sess_id}&case_id=$form_data{case_id}";
+ if($case_found == 1){ # case found
+   $out =<<CHAT;
+<table width=60%>
+<tr class=bot><td><h3>Информация по кейсу</h3></td>
+ <td>
+$html
+ </td></tr>
+<tr><td colspan=2><h3>Чат по кейсу</h3></td></tr>
+<tr><td colspan=2>
+  <iframe id="Chat" title="Inline chat" width=900 height=750
+   src="$chat_link?$url"></iframe>
+</td></tr>
+</table>
+CHAT
+ }
+ return $out;
+}
+
 ###################################################################
 sub mainform(){
  use vars qw();
@@ -465,6 +560,9 @@ sub mainform(){
    $html_blocks{main} = &getcaselist;
   }
   elsif($form_data{act} eq "defchat"){ # There should be jump to default chat
+  }
+  elsif($form_data{act} eq "casechat"){ # There is chat with case
+   $html_blocks{main} = &get_casechat;
   }
  }
 }
@@ -481,7 +579,9 @@ $dbh = DBI->connect("dbi:Pg:dbname=sddb","sdadm","ywTsPhO6f",
 
 &getenv();
 &checkuser();
-&menuform();
-&mainform();
+if(defined $user_data{session} and $user_data{session} ne ""){
+ &menuform();
+ &mainform();
+}
 print &htmlout;
 
