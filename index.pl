@@ -44,7 +44,7 @@ Content-type: text/html; charset="utf8"
  <link rel=stylesheet href="/ps.css" />
 </head>
 <body><center>
-<form method="GET" action="$ENV{SCRIPT_NAME}">
+<form method="POST" action="$ENV{SCRIPT_NAME}">
 <table>
 <tr class=bot><td><h2>DSS Servicedesk</h2></td>
     <td align=right>$html_blocks{auth}</td></tr>
@@ -68,41 +68,6 @@ $html_blocks{querytime}
 </html>
 HTML
  return $html
-}
-
-########################################################################
-sub getcaselist_old() { # Можно удалить
-# Get list of cases taking into account the user
- use vars qw($out $cust);
- $cust = '';
- if(defined $user_data{role} and $user_data{role} eq "customer"){
-   $cust = "WHERE customer_id = $user_data{id}"
- }
- $q =<<LIST;
-SELECT case_id, case_name, sn, pn, description, last_up::date,
-       customer, cust_city, begin_supp, end_supp, sla,
-       creator, status, message
-  FROM caseinfo
-  $cust
-LIST
- $sth = &sql_exec($q);
- $out = "<table>\n";
- while ($s = $sth->fetchrow_hashref){
-  $out .= "<tr><td rowspan=3 valign=top class=bot>";
-  $out .= "<a href=chat.pl?sess_id=$user_data{session}&case_id=$s->{case_id}>$s->{case_name}</a>";
-  $out .= "<br>$s->{creator}<br>$s->{last_up}</td>\n";
-  $out .= "<td>$s->{sn} / $s->{pn} / $s->{sla}<br>";
-  $out .= "<font size=-2>$s->{description}</font></td></tr>\n";
-  $out .= "<tr><td><b>$s->{customer}, $s->{cust_city}</b>, $s->{begin_supp} -";
-  $out .= " $s->{end_supp}</td></tr>\n";
-  if(defined $s->{message} and $s->{message} ne ''){
-    $out .= "<tr><td class=bot><br>$s->{message}</td></tr>\n"
-  }else{
-    $out .= "<tr><td class=bot><br>Описание проблемы отсутствует</td></tr>\n"
-  }
- }
- $out .= "</table>\n";
- return $out;
 }
 
 ########################################################################
@@ -197,8 +162,6 @@ GETINFO
 <tr><td align=right>Пользователь</td><td>$user_data{name}</td></tr>
 <tr><td align=right>Электропочта</td><td>$user_data{email}</td></tr>
 <tr><td align=right>Роль</td><td>$user_data{role}</td></tr>
-<!--
-<tr><td align=right>Session</td><td>$user_data{session}</td></tr> -->
 </table>
 <input type=hidden id=sess_id name=sess_id value=$user_data{session}>
 AUTH
@@ -233,13 +196,13 @@ sub menuform(){
  $html_blocks{menu} =<<MENU;
  <table class=invis width=95%>
   <tr><td class=menu width=33%>
-	<a href=$ENV{SCRIPT_NAME}?sess_id=$sid&act=create>
+	<a href=$ENV{SCRIPT_NAME}?act=create>
 	Создать кейс для оборудования</a></td>
    <td class=menu width=33%>
-	<a href=$ENV{SCRIPT_NAME}?sess_id=$sid&act=list>
+	<a href=$ENV{SCRIPT_NAME}?act=list>
 	Просмотр списка кейсов</a></td>
    <td class=menu width=33%>
-	<a href=$ENV{SCRIPT_NAME}?sess_id=$sid&act=defchat>
+	<a href=$ENV{SCRIPT_NAME}?act=defchat>
 	Написать в поддержку</a></td></tr>
  </table>
 MENU
@@ -288,7 +251,7 @@ THEAD
     if(!defined $s->{$_}){ $s->{$_} = '' }
   }
   $out .= "<tr><td class=bot>";
-  $out .= "<a href=$ENV{SCRIPT_NAME}?sess_id=$sid&act=casechat&case_id=";
+  $out .= "<a href=$ENV{SCRIPT_NAME}?act=casechat&case_id=";
     $out .=  $s->{case_id} . ">";
   $out .= "$s->{case_name}</a></td>\n";
   $out .= "<td class=bot>$s->{ext_name}</td>";
@@ -400,7 +363,7 @@ GETNAME
 $qmsg
 -->
 <p>Кейс $c_name для оборудования $form_data{sn} создан.</p>
-<a href=/sd/chat.pl?sess_id=$sess&case_id=$c_id>
+<a href=$ENV{SCRIPT_NAME}?act=casechat&case_id=$c_id>
 Перейти к чату по кейсу</a>
 SUMMARY
  return $ret
@@ -550,7 +513,7 @@ CFOUND
   while ($s = $sth->fetchrow_hashref){
     $c_found = $s->{count} || 0
   }
-  if($c_found == 1){
+  if($c_found == 1){ # Case found
   $q =<<CASE;
 SELECT case_id, case_name, sn, pn, description, last_up::date,
        customer, cust_city, begin_supp, end_supp, sla,
@@ -573,9 +536,11 @@ CASE
    $out .= "<td><b>$s->{sn}, $s->{pn}</b><br>\n";
    $out .= "$s->{description}</td></tr>\n";
    $out .= "<tr><th>SLA</th><td>$s->{sla}</td></tr>\n";
+
    $out .= "<tr><th>Статус</th><td>$s->{status}</td></tr>\n";
+# <-- set status here
    $out .= "<tr><th>Владелец</th>";
-   if($s->{creator} eq ""){
+   if($s->{creator} eq ""){ # Owner not set
      $out .= <<SETOWNER1;
 <td>Назначить: $s_owner</td></tr>
 <input type=hidden name=act id=act value=casechat>
@@ -631,6 +596,7 @@ sub mainform(){
    $html_blocks{main} = &getcaselist;
   }
   elsif($form_data{act} eq "defchat"){ # There should be jump to default chat
+   $html_blocks{main} = "<h2>Здесь будет просто чат</h2>\n";
   }
   elsif($form_data{act} eq "casechat"){ # There is chat with case
    $html_blocks{main} = &get_casechat;
