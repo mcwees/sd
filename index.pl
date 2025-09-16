@@ -270,6 +270,7 @@ LIST
   <th>Ext</th>
   <th>Last Up</th>
   <th>Status</th>
+  <th>Owner</th>
   <th>SN</th>
   <th>PN</th>
   <th>HW Desc</th>
@@ -283,15 +284,17 @@ LIST
 THEAD
  while ($s = $sth->fetchrow_hashref){
   foreach("ext_name", "sn", "pn", "description", "customer", "cust_city",
-	  "sla", "end_supp", "begin_supp"){
+	  "sla", "end_supp", "begin_supp", "creator"){
     if(!defined $s->{$_}){ $s->{$_} = '' }
   }
   $out .= "<tr><td class=bot>";
-  $out .= "<a href=$ENV{SCRIPT_NAME}?sess_id=$sid&act=casechat&case_id=" . $s->{case_id} . ">";
+  $out .= "<a href=$ENV{SCRIPT_NAME}?sess_id=$sid&act=casechat&case_id=";
+    $out .=  $s->{case_id} . ">";
   $out .= "$s->{case_name}</a></td>\n";
   $out .= "<td class=bot>$s->{ext_name}</td>";
   $out .= "<td class=bot>$s->{last_up}</td>";
   $out .= "<td class=bot>$s->{status}</td>\n";
+  $out .= "<td class=bot>$s->{creator}</td>\n";
   $out .= "<td class=bot>$s->{sn}</td><td class=bot>$s->{pn}</td>";
   $out .= "<td class=bot><font size=-2>$s->{description}</font></td>\n";
   if(defined $s->{message} and $s->{message} ne ''){
@@ -470,13 +473,72 @@ CREAT1
  return $out;
 }
 
+sub sel_owners() {
+ use vars qw($q %owners $out);
+ $q = <<OWNERS;
+SELECT id, name FROM sd_users
+ LEFT JOIN roles USING (role)
+ WHERE can_own
+OWNERS
+ $sth = &sql_exec($q);
+ while ($s = $sth->fetchrow_hashref){
+  $owners{ $s->{id} } = $s->{name}
+ }
+ $out = <<S_OWN;
+<select name=sel_owner id=sel_owner>
+ <option value=0>--Выбрать владельца</option>
+S_OWN
+ foreach(keys %owners){
+  $out .= "<option value=$_>$owners{$_}</option>\n";
+ }
+ $out .= "<input type=button value=set_owner onClick=this.form.submit()>";
+ return $out;
+}
+
+sub set_owner(){
+# Checks and set owner for case
+ use vars qw($q $of $o_valid);
+ $q =<<SET2;
+SELECT owner_id FROM sd_cases WHERE id = $form_data{case_id}
+SET2
+ $sth = &sql_exec($q);
+ $of = 1; $o_valid = 0;
+ while ($s = $sth->fetchrow_hashref){
+  if(!defined $s->{owner_id}){ $of = 0 }
+ }
+ if($of == 0){ #Owner not set
+  $q = <<SET3;
+SELECT id FROM sd_users LEFT JOIN roles USING (role)
+ WHERE can_own AND id = $form_data{sel_owner}
+SET3
+  $sth = &sql_exec($q);
+  while ($s = $sth->fetchrow_hashref){
+   if(defined $s->{id} and $s->{id} == $form_data{sel_owner}){
+	$o_valid = 1;
+   }
+  }
+  if($o_valid == 1){ # Устанавливаем владельца кейсу
+   
+   $q = <<SET4;
+UPDATE sd_cases SET owner_id = $form_data{sel_owner}
+ WHERE id = $form_data{case_id}
+SET4
+   $sth = &sql_exec($q);
+  }
+ }
+}
+
 sub get_caseinfo() {
 #
 # Get case info
 #
- use vars qw($q $qsess $out $cust_f $c_found);
+ use vars qw($q $qsess $out $cust_f $c_found $s_owner);
  $c_found = 0;
+ $s_owner = &sel_owners;
  if(defined $form_data{case_id} and $form_data{case_id} > 0){
+  if(defined $form_data{sel_owner} and $form_data{sel_owner} > 0){
+   &set_owner;
+  }
   $cust_f = "";
   if(defined $user_data{role} and $user_data{role} eq "customer"){
     $cust_f = "AND customer = '" . $user_data{name} . "'";
@@ -512,7 +574,16 @@ CASE
    $out .= "$s->{description}</td></tr>\n";
    $out .= "<tr><th>SLA</th><td>$s->{sla}</td></tr>\n";
    $out .= "<tr><th>Статус</th><td>$s->{status}</td></tr>\n";
-   $out .= "<tr><th>Владелец</th><td>$s->{creator}</td></tr>\n";
+   $out .= "<tr><th>Владелец</th>";
+   if($s->{creator} eq ""){
+     $out .= <<SETOWNER1;
+<td>Назначить: $s_owner</td></tr>
+<input type=hidden name=act id=act value=casechat>
+<input type=hidden name=case_id id=case_id value=$form_data{case_id}>
+SETOWNER1
+   }else{
+     $out .= "<td>$s->{creator}</td></tr>\n";
+   }
   }
   $out .= "</table>\n";
   }else{
