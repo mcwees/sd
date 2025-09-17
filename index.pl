@@ -21,6 +21,7 @@ $chat_link = "http://dss.complete.ru:2223/chat";
         auth => '',
         info => '',
 	menu => '',
+	form => '',
 	caseinfo => '',
 	querytime => '',
         main => '<h2>Вы не зарегистрированы в системе.</h2>',
@@ -55,6 +56,7 @@ $html_blocks{menu}
 </td></tr>
 <tr><td colspan=2>
 $html_blocks{main}
+$html_blocks{form}
 </td></tr>
 </table>
 <!--
@@ -75,7 +77,8 @@ sub getenv() {
 # Get all environment (QUERY_STRING and POST Data)
  use vars qw($k $v $q $qsess);
  if(defined $ENV{QUERY_STRING}){
-  @qry = split "&", $ENV{QUERY_STRING}}
+  @qry = split "&", $ENV{QUERY_STRING}
+ }
  if(defined $ENV{CONTENT_LENGTH} and $ENV{CONTENT_LENGTH} > 0){
   read(STDIN, my $raw_post, $ENV{CONTENT_LENGTH});
   @qry = split "&", $raw_post}
@@ -83,7 +86,12 @@ sub getenv() {
   ($k, $v) = split "=", $_;
   $v =~ s/\+/ /g;
   $form_data{$k} = decode('UTF-8',
-        uri_decode($v)) if(defined $k && defined $v)
+        uri_decode($v)) if(defined $k && defined $v);
+  if($k eq "act" or $k eq "case_id"){ # set inputs for form
+   $html_blocks{form} .=<<SETFORM;
+<input type=hidden name="$k" id="$k" value="$v">
+SETFORM
+  }
  }
  $html_blocks{info} .= "-- ENV:\n";
  foreach(sort keys %ENV){
@@ -229,20 +237,24 @@ LIST
  $out = "<table>\n";
  $out .= <<THEAD;
  <tr>
-  <th>N</th>
-  <th>Ext</th>
-  <th>Last Up</th>
-  <th>Status</th>
-  <th>Owner</th>
-  <th>SN</th>
-  <th>PN</th>
-  <th>HW Desc</th>
-  <th>Issue</th>
-  <th>Customer</th>
-  <th>City</th>
-  <th>SLA</th>
-<!--  <th>Start</th>
-  <th>End</th> -->
+  <th colspan=12>
+   <p class="form">
+   </p>
+  </th>
+ </tr>
+ <tr>
+  <th colspan=5 class="bb_thin">Информация о кейсе</th>
+  <th colspan=3 class="bb_thin lb_thin">Оборудование</th>
+  <th rowspan=2 class="lb_thin">Issue</th>
+  <th colspan=2 class="bb_thin lb_thin">Заказчик</th>
+  <th rowspan=2 class="lb_thin">SLA</th>
+ </tr>
+ <tr>
+  <th>#</th><th>Ext</th><th>Last Up</th><th>Status</th><th>Owner</th>
+  <th class="lb_thin">SN</th><th>PN</th><th>HW Desc</th>
+<!--  <th class="lb_thin">Issue</th> -->
+  <th class="lb_thin">Customer</th><th>City</th>
+<!--  <th class="lb_thin">SLA</th> -->
  </tr>
 THEAD
  while ($s = $sth->fetchrow_hashref){
@@ -258,16 +270,16 @@ THEAD
   $out .= "<td class=bot>$s->{last_up}</td>";
   $out .= "<td class=bot>$s->{status}</td>\n";
   $out .= "<td class=bot>$s->{creator}</td>\n";
-  $out .= "<td class=bot>$s->{sn}</td><td class=bot>$s->{pn}</td>";
+  $out .= "<td class=\"bot lb_thin\">$s->{sn}</td><td class=bot>$s->{pn}</td>";
   $out .= "<td class=bot><font size=-2>$s->{description}</font></td>\n";
   if(defined $s->{message} and $s->{message} ne ''){
-    $out .= "<td class=bot>$s->{message}</td>"
+    $out .= "<td class=\"bot lb_thin\">$s->{message}</td>"
   }else{
-    $out .= "<td class=bot>Описание проблемы отсутствует</td>";
+    $out .= "<td class=\"bot lb_thin\">Описание проблемы отсутствует</td>";
   }
-  $out .= "<td class=bot>$s->{customer}</td>";
+  $out .= "<td class=\"bot lb_thin\">$s->{customer}</td>";
   $out .= "<td class=bot>$s->{cust_city}</td>\n";
-  $out .= "<td class=bot>$s->{sla}</td>";
+  $out .= "<td class=\"bot lb_thin\">$s->{sla}</td>";
   $out .= "<!-- <td class=bot>$s->{begin_supp}</td>";
   $out .= "<td class=bot>$s->{end_supp}</td> --></tr>\n";
  }
@@ -454,7 +466,10 @@ S_OWN
  foreach(keys %owners){
   $out .= "<option value=$_>$owners{$_}</option>\n";
  }
- $out .= "<input type=button value=set_owner onClick=this.form.submit()>";
+ $out .= <<S_OWNFIN;
+</select>
+<input type=button value=Назначить onClick=this.form.submit()>
+S_OWNFIN
  return $out;
 }
 
@@ -491,16 +506,73 @@ SET4
  }
 }
 
+######################################
+sub getnextstatus(){
+# Get next statuses
+ use vars qw($q $qstat $sqlh $src $out @states $f_found %stat_desc);
+ $qstat = shift;
+ $f_found = 0;
+ $qstat = "'" . $qstat . "'";
+ $q =<<GETNEXT;
+SELECT next_status, next_desc FROM nextstatusfull
+ WHERE current_status = $qstat
+GETNEXT
+ $sqlh = &sql_exec($q);
+ while ($src = $sqlh->fetchrow_hashref){
+  push @states, $src->{next_status};
+  $stat_desc{$src->{next_status}} = $src->{next_desc};
+  $f_found = 1
+ }
+ if($f_found > 0){ # next statuses found
+  $out = "<select name=nextstate id=nextstate><option value=''>--Выбрать</option>\n";
+  foreach(@states){
+   $out .= "<option value=$_>$stat_desc{$_}</option>\n";
+  }
+  $out .= <<FIN02;
+</select>
+<input type=button value='Изменить' onClick=this.form.submit()>
+FIN02
+ }
+ return $out;
+}
+
+#################################################
+sub setnextstatus(){
+ use vars qw($q $sf $s_valid $qstr);
+ $qstr = "'" . $form_data{nextstate} . "'";
+ $q =<<SET01;
+SELECT next_status FROM sd_cases t1
+ LEFT JOIN nextstatusshort t2 ON lower(t1.status) = current_status
+ WHERE id = $form_data{case_id} AND next_status = $qstr
+SET01
+ $sth = &sql_exec($q);
+ while ($s = $sth->fetchrow_hashref){
+   $sf = $s->{next_status} || ""
+ }
+ if($sf ne ""){
+  $sf = "'" . $sf . "'";
+  $q =<<SET02;
+UPDATE sd_cases SET status = $sf, updated_by = $user_data{id}
+ WHERE id = $form_data{case_id}
+SET02
+  $sth = &sql_exec($q);
+  # ...and check errors
+ }
+}
+
 sub get_caseinfo() {
 #
 # Get case info
 #
- use vars qw($q $qsess $out $cust_f $c_found $s_owner);
+ use vars qw($q $qsess $out $cust_f $c_found $s_owner $next_st);
  $c_found = 0;
  $s_owner = &sel_owners;
  if(defined $form_data{case_id} and $form_data{case_id} > 0){
   if(defined $form_data{sel_owner} and $form_data{sel_owner} > 0){
-   &set_owner;
+   &set_owner; # с морды пришел запрос на установку владельца
+  }
+  if(defined $form_data{nextstate} and $form_data{nextstate} ne ""){
+   &setnextstatus; # с морды пришел запрос на смену статуса
   }
   $cust_f = "";
   if(defined $user_data{role} and $user_data{role} eq "customer"){
@@ -514,11 +586,24 @@ CFOUND
     $c_found = $s->{count} || 0
   }
   if($c_found == 1){ # Case found
+   if(defined $form_data{nextstate} and $form_data{nextstate} ne ""){
+    &setnextstatus;
+   }
+   # firstly get status and get possible next statuses
+  $q = <<GETST;
+SELECT status FROM caseinfo WHERE case_id = $form_data{case_id} $cust_f
+GETST
+  $sth = &sql_exec($q);
+  while ($s = $sth->fetchrow_hashref){
+	$next_st = $s->{status}
+  }
+  $next_st = &getnextstatus(lc($next_st));
   $q =<<CASE;
-SELECT case_id, case_name, sn, pn, description, last_up::date,
+SELECT case_id, case_name, sn, pn, t1.description, last_up::date,
        customer, cust_city, begin_supp, end_supp, sla,
-       creator, status, message, ext_name
-  FROM caseinfo
+       creator, status, message, ext_name, t2.description AS case_desc
+  FROM caseinfo t1
+  LEFT JOIN case_statuses t2 USING (status)
   WHERE case_id = $form_data{case_id} $cust_f
 CASE
   $sth = &sql_exec($q);
@@ -536,9 +621,6 @@ CASE
    $out .= "<td><b>$s->{sn}, $s->{pn}</b><br>\n";
    $out .= "$s->{description}</td></tr>\n";
    $out .= "<tr><th>SLA</th><td>$s->{sla}</td></tr>\n";
-
-   $out .= "<tr><th>Статус</th><td>$s->{status}</td></tr>\n";
-# <-- set status here
    $out .= "<tr><th>Владелец</th>";
    if($s->{creator} eq ""){ # Owner not set
      $out .= <<SETOWNER1;
@@ -549,6 +631,7 @@ SETOWNER1
    }else{
      $out .= "<td>$s->{creator}</td></tr>\n";
    }
+   $out .= "<tr><th>Статус</th><td>$s->{case_desc}\n$next_st</td></tr>\n";
   }
   $out .= "</table>\n";
   }else{
