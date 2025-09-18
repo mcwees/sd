@@ -253,7 +253,8 @@ LIST
  $out .= <<THEAD;
  <tr>
   <th colspan=12>
-   <p class="form">Фильтр по статусу:
+   <p class="form">Фильтрация
+    по статусу:
     <input type=radio id=w_status name=w_status value=unclosed
      $close_state{unclosed} onChange="this.form.submit()"> Незакрытые |
     <input type=radio id=w_status name=w_status value=closed
@@ -472,8 +473,8 @@ CREAT1
 sub sel_owners() {
  use vars qw($q %owners $out);
  $q = <<OWNERS;
-SELECT id, name FROM sd_users
- LEFT JOIN roles USING (role)
+SELECT DISTINCT id, name FROM sd_users t1
+ LEFT JOIN roles t2 ON t1.role = t2.role OR t2.role = ANY (t1.add_roles)
  WHERE can_own
 OWNERS
  $sth = &sql_exec($q);
@@ -507,7 +508,8 @@ SET2
  }
  if($of == 0){ #Owner not set
   $q = <<SET3;
-SELECT id FROM sd_users LEFT JOIN roles USING (role)
+SELECT DISTINCT id FROM sd_users t1
+ LEFT JOIN roles t2 ON t1.role = t2.role OR t2.role = ANY (t1.add_roles)
  WHERE can_own AND id = $form_data{sel_owner}
 SET3
   $sth = &sql_exec($q);
