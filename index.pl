@@ -220,25 +220,46 @@ MENU
 sub getcaselist() {
 #
 # Get cases list
- use vars qw($out $cust $sid);
+ use vars qw($out $cust $sid %close_state $state_sql);
  $sid = $form_data{sess_id};
- $cust = '';
+ $cust = $state_sql = '';
+ %close_state = (
+	'unclosed' => 'checked',
+	'closed'   => '',
+	'all'	   => '');
+ if(!defined $form_data{w_status} or $form_data{w_status} eq 'unclosed'){
+   $form_data{w_status} = 'unclosed';
+   $state_sql = "AND NOT is_closed";
+ }elsif($form_data{w_status} eq 'closed'){
+   %close_state = ( 'unclosed' => '', 'closed' => 'checked', 'all' => '');
+   $state_sql = "AND is_closed";
+ }elsif($form_data{w_status} eq 'all'){
+   %close_state = ( 'unclosed' => '', 'closed' => '', 'all' => 'checked');
+ }
  if(defined $user_data{role} and $user_data{role} eq "customer"){
-   $cust = "WHERE customer_id = $user_data{id}"
+   $cust = "AND customer_id = $user_data{id}"
  }
  $q =<<LIST;
 SELECT case_id, case_name, sn, pn, description::varchar(20), last_up::date,
        customer, cust_city, begin_supp, end_supp, sla, ext_name,
        creator, status, message
   FROM caseinfo
+  WHERE TRUE
   $cust
+  $state_sql
 LIST
  $sth = &sql_exec($q);
  $out = "<table>\n";
  $out .= <<THEAD;
  <tr>
   <th colspan=12>
-   <p class="form">
+   <p class="form">Фильтр по статусу:
+    <input type=radio id=w_status name=w_status value=unclosed
+     $close_state{unclosed} onChange="this.form.submit()"> Незакрытые |
+    <input type=radio id=w_status name=w_status value=closed
+     $close_state{closed} onChange="this.form.submit()">Закрытые |
+    <input type=radio id=w_status name=w_status value=all
+     $close_state{all} onChange="this.form.submit()">Все
    </p>
   </th>
  </tr>
