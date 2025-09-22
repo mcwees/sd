@@ -599,7 +599,7 @@ sub get_caseinfo() {
   }
   $cust_f = "";
   if(defined $user_data{role} and $user_data{role} eq "customer"){
-    $cust_f = "AND customer = '" . $user_data{name} . "'";
+    $cust_f = "AND customer_id = $user_data{id}";
   }
   $q =<<CFOUND;
 SELECT count(*) FROM caseinfo WHERE case_id = $form_data{case_id} $cust_f
