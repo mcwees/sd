@@ -612,39 +612,38 @@ CFOUND
    if(defined $form_data{nextstate} and $form_data{nextstate} ne ""){
     &setnextstatus;
    }
-   # firstly get status and get possible next statuses
+   # get status and get possible next statuses
   $q = <<GETST;
-SELECT status FROM caseinfo WHERE case_id = $form_data{case_id} $cust_f
+SELECT shortstatus FROM caseinfo WHERE case_id = $form_data{case_id} $cust_f
 GETST
   $sth = &sql_exec($q);
   while ($s = $sth->fetchrow_hashref){
-	$next_st = $s->{status}
+	$next_st = $s->{shortstatus}
   }
   $next_st = &getnextstatus(lc($next_st));
   $q =<<CASE;
 SELECT case_id, case_name, sn, pn, t1.description, last_up::date,
        customer, cust_city, begin_supp, end_supp, sla,
-       creator, status, message, ext_name, t2.description AS case_desc
+       creator, t2.status, message, ext_name, t2.description AS case_desc
   FROM caseinfo t1
-  LEFT JOIN case_statuses t2 USING (status)
+  LEFT JOIN case_statuses t2 ON t2.status = t1.shortstatus
   WHERE case_id = $form_data{case_id} $cust_f
 CASE
   $sth = &sql_exec($q);
-  $out = "<table class=invis>\n";
   while ($s = $sth->fetchrow_hashref){
    foreach("creator", "customer", "cust_city", "ext_name"){
 	if(!defined $s->{$_}){$s->{$_} = ""}
    }
-   $out .= "<tr><th colspan=2>$s->{case_name}</th></tr>\n";
-   $out .= "<tr><th>Имя во внешней<br>системе</th>";
-     $out .= "<td>$s->{ext_name}</td>\n";
-   $out .= "<tr><th>Заказчик</th>";
-   $out .= "<td>$s->{customer}, $s->{cust_city}</td></tr>\n";
-   $out .= "<tr><th>Оборудование</th>";
-   $out .= "<td><b>$s->{sn}, $s->{pn}</b><br>\n";
-   $out .= "$s->{description}</td></tr>\n";
-   $out .= "<tr><th>SLA</th><td>$s->{sla}</td></tr>\n";
-   $out .= "<tr><th>Владелец</th>";
+   $out =<<CASE_DET;
+<details open><summary>Детали по кейсу $s->{case_name}</summary>
+<table width=98%>
+<tr><th>Имя во внешней<br>системе</th><td>$s->{ext_name}</td>
+<tr><th>Заказчик</th><td>$s->{customer}, $s->{cust_city}</td></tr>
+<tr><th>Оборудование</th><td><b>$s->{sn}, $s->{pn}</b><br>
+        $s->{description}</td></tr>
+<tr><th>SLA</th><td>$s->{sla}</td></tr>
+<tr><th>Владелец</th>
+CASE_DET
    if($s->{creator} eq ""){ # Owner not set
      $out .= <<SETOWNER1;
 <td>Назначить: $s_owner</td></tr>
@@ -656,7 +655,7 @@ SETOWNER1
    }
    $out .= "<tr><th>Статус</th><td>$s->{case_desc}\n$next_st</td></tr>\n";
   }
-  $out .= "</table>\n";
+  $out .= "</table></details>\n";
   }else{
    $out = "<p>Case $form_data{case_id} not accessible</p>";
   }
@@ -674,17 +673,10 @@ sub get_casechat(){
  $url = "sess_id=$form_data{sess_id}&case_id=$form_data{case_id}";
  if($case_found == 1){ # case found
    $out =<<CHAT;
-<table width=60%>
-<tr class=bot><td><h3>Информация по кейсу</h3></td>
- <td>
 $html
- </td></tr>
-<tr><td colspan=2><h3>Чат по кейсу</h3></td></tr>
-<tr><td colspan=2>
+<h3>Чат по кейсу</h3>
   <iframe id="Chat" title="Inline chat" width=900 height=750
    src="$chat_link?$url"></iframe>
-</td></tr>
-</table>
 CHAT
  }
  return $out;
