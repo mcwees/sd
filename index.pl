@@ -16,7 +16,7 @@ use open qw( :std :encoding(UTF-8) );
 use vars qw($dbh $auth_user $sth $q $s $quot_name %user_data %html_blocks
 	    %form_data @qry $chat_link);
 
-$chat_link = "http://dss.complete.ru:2223/chat";
+$chat_link = "http://dss.complete.ru:2222/chat";
 %html_blocks = (
         auth => '',
         info => '',
@@ -240,9 +240,9 @@ sub getcaselist() {
    $cust = "AND customer_id = $user_data{id}"
  }
  $q =<<LIST;
-SELECT case_id, case_name, sn, pn, description::varchar(20), last_up::date,
-       customer, cust_city, begin_supp, end_supp, sla, ext_name,
-       creator, status, message
+SELECT DISTINCT case_id, case_name, sn, pn, description::varchar(20),
+       last_up::date, customer, cust_city, begin_supp, end_supp, sla,
+       ext_name, creator, status, message
   FROM caseinfo
   WHERE TRUE
   $cust
@@ -602,7 +602,8 @@ sub get_caseinfo() {
     $cust_f = "AND customer_id = $user_data{id}";
   }
   $q =<<CFOUND;
-SELECT count(*) FROM caseinfo WHERE case_id = $form_data{case_id} $cust_f
+SELECT count(DISTINCT case_id) FROM caseinfo
+ WHERE case_id = $form_data{case_id} $cust_f
 CFOUND
   $sth = &sql_exec($q);
   while ($s = $sth->fetchrow_hashref){
