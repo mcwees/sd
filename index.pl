@@ -242,17 +242,18 @@ sub getcaselist() {
  $q =<<LIST;
 SELECT DISTINCT case_id, case_name, sn, pn, description::varchar(20),
        last_up::date, customer, cust_city, begin_supp, end_supp, sla,
-       ext_name, creator, status, message
+       ext_name, creator, status, message, created_at::date
   FROM caseinfo
   WHERE TRUE
   $cust
   $state_sql
+  ORDER BY created_at
 LIST
  $sth = &sql_exec($q);
  $out = "<table>\n";
  $out .= <<THEAD;
  <tr>
-  <th colspan=12>
+  <th colspan=13>
    <p class="form">Фильтрация
     по статусу:
     <input type=radio id=w_status name=w_status value=unclosed
@@ -265,14 +266,15 @@ LIST
   </th>
  </tr>
  <tr>
-  <th colspan=5 class="bb_thin">Информация о кейсе</th>
+  <th colspan=6 class="bb_thin">Информация о кейсе</th>
   <th colspan=3 class="bb_thin lb_thin">Оборудование</th>
   <th rowspan=2 class="lb_thin">Issue</th>
   <th colspan=2 class="bb_thin lb_thin">Заказчик</th>
   <th rowspan=2 class="lb_thin">SLA</th>
  </tr>
  <tr>
-  <th>#</th><th>Ext</th><th>Last Up</th><th>Status</th><th>Owner</th>
+  <th>#</th><th>Ext</th><th>Created</th><th>Last Up</th>
+	<th>Status</th><th>Owner</th>
   <th class="lb_thin">SN</th><th>PN</th><th>HW Desc</th>
 <!--  <th class="lb_thin">Issue</th> -->
   <th class="lb_thin">Customer</th><th>City</th>
@@ -289,8 +291,9 @@ THEAD
     $out .=  $s->{case_id} . ">";
   $out .= "$s->{case_name}</a></td>\n";
   $out .= "<td class=bot>$s->{ext_name}</td>";
+  $out .= "<td class=bot>$s->{created_at}</td>";
   $out .= "<td class=bot>$s->{last_up}</td>";
-  $out .= "<td class=bot>$s->{status}</td>\n";
+  $out .= "<td class=bot align=center>$s->{status}</td>\n";
   $out .= "<td class=bot>$s->{creator}</td>\n";
   $out .= "<td class=\"bot lb_thin\">$s->{sn}</td><td class=bot>$s->{pn}</td>";
   $out .= "<td class=bot><font size=-2>$s->{description}</font></td>\n";
@@ -532,28 +535,82 @@ SET4
 ######################################
 sub getnextstatus(){
 # Get next statuses
- use vars qw($q $qstat $sqlh $src $out @states $f_found %stat_desc);
+ use vars qw($q $qstat $sqlh $src $out @states $f_found %stat_desc $sel
+	     %stat_msgreq $js);
  $qstat = shift;
  $f_found = 0;
  $qstat = "'" . $qstat . "'";
  $q =<<GETNEXT;
-SELECT next_status, next_desc FROM nextstatusfull
+SELECT next_status, next_desc, need_msg, layer FROM nextstatusfull
  WHERE current_status = $qstat
 GETNEXT
  $sqlh = &sql_exec($q);
+ $js = "const msgneed = {\n";
  while ($src = $sqlh->fetchrow_hashref){
   push @states, $src->{next_status};
   $stat_desc{$src->{next_status}} = $src->{next_desc};
+  $stat_msgreq{$src->{next_status}} = $src->{need_msg};
+  $js .= "   $src->{next_status}: $src->{need_msg},\n";
   $f_found = 1
  }
+ $js .= "  };\n";
  if($f_found > 0){ # next statuses found
-  $out = "<select name=nextstate id=nextstate><option value=''>--Выбрать</option>\n";
+  $sel =<<SELECT;
+<select name=nextstate id=nextstate ><option value=''>--Выбрать</option>
+SELECT
   foreach(@states){
-   $out .= "<option value=$_>$stat_desc{$_}</option>\n";
+   $sel .= "<option value=$_>$stat_desc{$_}</option>\n";
   }
-  $out .= <<FIN02;
-</select>
-<input type=button value='Изменить' onClick=this.form.submit()>
+  $sel .= "</select>\n";
+  $out = <<FIN02;
+
+<!-- Popup window with change status new -->
+<button onclick="openchstatus()" type="button">change status</button>
+ <div id="popup_my" class="popup_my">
+  <table class=invis width=100%>
+   <tr><th align=left width=93%>Изменение статуса</th>
+       <th align=center><span onclick="closechstatus()"
+	style="cursor:default; font-size:16pt;">×</span></th></tr>
+   <tr><td colspan=2>
+   <br>$sel<br></td></tr>
+   <tr><td colspan=2 align=center>
+   <label for=textmsg>Введите связанное сообщение</label><br>
+   <textarea cols=40 rows=10 id=textmsg name=textmsg
+	placeholder="Введите связанное сообщение здесь..."></textarea>
+   </td></tr>
+   <tr><td colspan=2 align=center><button onclick="closechstatus()" id=modbtn
+	name=modbtn disabled>Изменить</button>
+   </td></tr>
+  </table>
+ </div>
+ <script>
+  $js
+  const popup_my = document.getElementById('popup_my');
+  const text_my = document.getElementById('textmsg');
+  const toggle_my = document.getElementById('modbtn');
+  var msglen = 10;
+  function openchstatus(){
+   popup_my.classList.add("popup_my-open");
+  }
+  function closechstatus(){
+   popup_my.classList.remove("popup_my-open");
+  }
+  nextstate.addEventListener("change", (e) => {
+   msglen = msgneed[e.target.value] * 10;
+   if(msgneed[e.target.value] == 0){
+	toggle_my.disabled = false;
+   }else{
+	toggle_my.disabled = true;
+   }
+  });
+  text_my.addEventListener("selectionchange", () => {
+   if(text_my.textLength > msglen){
+	toggle_my.disabled = false;
+   }else{
+	toggle_my.disabled = true;
+   }
+  });
+ </script>
 FIN02
  }
  return $out;
@@ -561,7 +618,7 @@ FIN02
 
 #################################################
 sub setnextstatus(){
- use vars qw($q $sf $s_valid $qstr);
+ use vars qw($q $sf $s_valid $qstr $textval);
  $qstr = "'" . $form_data{nextstate} . "'";
  $q =<<SET01;
 SELECT next_status FROM sd_cases t1
@@ -573,13 +630,13 @@ SET01
    $sf = $s->{next_status} || ""
  }
  if($sf ne ""){
-  $sf = "'" . $sf . "'";
+  $sf = "'" . $sf . "'"; $textval = "'" . $form_data{textmsg} . "'";
   $q =<<SET02;
-UPDATE sd_cases SET status = $sf, updated_by = $user_data{id}
- WHERE id = $form_data{case_id}
+SELECT * FROM status_change($user_data{id}, $form_data{case_id},
+  $sf, $textval)
 SET02
   $sth = &sql_exec($q);
-  # ...and check errors
+  # ...and check return value. Should be TRUE
  }
 }
 
@@ -594,9 +651,9 @@ sub get_caseinfo() {
   if(defined $form_data{sel_owner} and $form_data{sel_owner} > 0){
    &set_owner; # с морды пришел запрос на установку владельца
   }
-  if(defined $form_data{nextstate} and $form_data{nextstate} ne ""){
-   &setnextstatus; # с морды пришел запрос на смену статуса
-  }
+#  if(defined $form_data{nextstate} and $form_data{nextstate} ne ""){
+#   &setnextstatus; # с морды пришел запрос на смену статуса
+#  }
   $cust_f = "";
   if(defined $user_data{role} and $user_data{role} eq "customer"){
     $cust_f = "AND customer_id = $user_data{id}";
@@ -615,7 +672,8 @@ CFOUND
    }
    # get status and get possible next statuses
   $q = <<GETST;
-SELECT shortstatus FROM caseinfo WHERE case_id = $form_data{case_id} $cust_f
+SELECT shortstatus FROM caseinfo
+ WHERE case_id = $form_data{case_id} $cust_f
 GETST
   $sth = &sql_exec($q);
   while ($s = $sth->fetchrow_hashref){
@@ -625,7 +683,7 @@ GETST
   $q =<<CASE;
 SELECT case_id, case_name, sn, pn, t1.description, last_up::date,
        customer, cust_city, begin_supp, end_supp, sla,
-       creator, t2.status, message, ext_name, t2.description AS case_desc
+       creator, t2.status, message, ext_name, t2.description AS status_desc
   FROM caseinfo t1
   LEFT JOIN case_statuses t2 ON t2.status = t1.shortstatus
   WHERE case_id = $form_data{case_id} $cust_f
@@ -642,19 +700,24 @@ CASE
 <tr><th>Заказчик</th><td>$s->{customer}, $s->{cust_city}</td></tr>
 <tr><th>Оборудование</th><td><b>$s->{sn}, $s->{pn}</b><br>
         $s->{description}</td></tr>
+<tr><th>Последнее изменение</th><td>$s->{last_up}</td></tr>
 <tr><th>SLA</th><td>$s->{sla}</td></tr>
 <tr><th>Владелец</th>
 CASE_DET
    if($s->{creator} eq ""){ # Owner not set
      $out .= <<SETOWNER1;
 <td>Назначить: $s_owner</td></tr>
-<input type=hidden name=act id=act value=casechat>
-<input type=hidden name=case_id id=case_id value=$form_data{case_id}>
 SETOWNER1
+     if(!defined $form_data{act}){
+       $out .= "<input type=hidden name=act id=act value=casechat>\n";
+     }
+     if(!defined $form_data{case_id}){
+	$out .= "<input type=hidden name=case_id id=case_id value=$form_data{case_id}>\n";
+     }
    }else{
      $out .= "<td>$s->{creator}</td></tr>\n";
    }
-   $out .= "<tr><th>Статус</th><td>$s->{case_desc}\n$next_st</td></tr>\n";
+   $out .= "<tr><th>Статус</th><td>$s->{status_desc}\n$next_st</td></tr>\n";
   }
   $out .= "</table></details>\n";
   }else{
