@@ -41,20 +41,21 @@ Content-type: text/html; charset="utf8"
 
 <!DOCTYPE html>
 <html><head>
- <title>Main user menu</title>
+ <title>Кондуктор&trade;</title>
  <link rel=stylesheet href="/ps.css" />
 </head>
 <body><center>
 <form method="POST" action="$ENV{SCRIPT_NAME}">
-<table>
-<tr class=bot><td><h2>DSS Servicedesk</h2></td>
+<table width=60% class=shadow>
+<tr class=bot><td><img src=/icons/dss-logo.png></td>
+  <td><h1>DSS ServiceDesk</h1></td>
     <td align=right>$html_blocks{auth}</td></tr>
 
-<tr><td colspan=2 align=center>
+<tr><td colspan=3 align=center>
 <!-- Main menu -->
 $html_blocks{menu}
 </td></tr>
-<tr><td colspan=2>
+<tr><td colspan=3>
 $html_blocks{main}
 $html_blocks{form}
 </td></tr>
@@ -220,13 +221,18 @@ MENU
 sub getcaselist() {
 #
 # Get cases list
- use vars qw($out $cust $sid %close_state $state_sql);
+ use vars qw($out $cust $sid %close_state $state_sql %own_state $llen);
+ $llen = 60;
  $sid = $form_data{sess_id};
  $cust = $state_sql = '';
  %close_state = (
 	'unclosed' => 'checked',
 	'closed'   => '',
 	'all'	   => '');
+ %own_state = (
+	'self_own' => '',
+	'no_own' => '',
+	'all'	 => 'checked');
  if(!defined $form_data{w_status} or $form_data{w_status} eq 'unclosed'){
    $form_data{w_status} = 'unclosed';
    $state_sql = "AND NOT is_closed";
@@ -236,6 +242,16 @@ sub getcaselist() {
  }elsif($form_data{w_status} eq 'all'){
    %close_state = ( 'unclosed' => '', 'closed' => '', 'all' => 'checked');
  }
+ if(!defined $form_data{w_owner} or $form_data{w_owner} eq 'all'){
+   $form_data{w_owner} = 'all';
+ }elsif($form_data{w_owner} eq 'no_own'){
+   %own_state = ('self_own' => '', 'no_own' => 'checked', 'all' => '');
+   $state_sql .= " AND creator IS NULL";
+ }elsif($form_data{w_owner} eq 'self_own'){
+   %own_state = ('self_own' => 'checked', 'no_own' => '', 'all' => '');
+   $state_sql .= " AND creator = '" . $user_data{name} . "'";
+ }
+
  if(defined $user_data{role} and $user_data{role} eq "customer"){
    $cust = "AND customer_id = $user_data{id}"
  }
@@ -250,19 +266,28 @@ SELECT DISTINCT case_id, case_name, sn, pn, description::varchar(20),
   ORDER BY created_at
 LIST
  $sth = &sql_exec($q);
- $out = "<table>\n";
  $out .= <<THEAD;
+ <table width=100%>
  <tr>
   <th colspan=13>
-   <p class="form">Фильтрация
-    по статусу:
+    <fieldset style="width:20%;display:inline; float:right;">
+	<legend>Фильтрация по владельцу:</legend>
+    <input type=radio id=w_owner name=w_owner value=self_own
+	$own_state{self_own} onChange="this.form.submit()"> Свои |
+    <input type=radio id=w_owner name=w_owner value=no_own
+	$own_state{no_own} onChange="this.form.submit()"> Без владельца |
+    <input type=radio id=w_owner name=w_owner value=all
+	$own_state{all} onChange="this.form.submit()"> Все
+    </fieldset>
+    <fieldset style="width:20%; display: inline; float:right;">
+	<legend>Фильтрация по статусу:</legend>
     <input type=radio id=w_status name=w_status value=unclosed
      $close_state{unclosed} onChange="this.form.submit()"> Незакрытые |
     <input type=radio id=w_status name=w_status value=closed
      $close_state{closed} onChange="this.form.submit()">Закрытые |
     <input type=radio id=w_status name=w_status value=all
      $close_state{all} onChange="this.form.submit()">Все
-   </p>
+    </fieldset>
   </th>
  </tr>
  <tr>
@@ -297,11 +322,22 @@ THEAD
   $out .= "<td class=bot>$s->{creator}</td>\n";
   $out .= "<td class=\"bot lb_thin\">$s->{sn}</td><td class=bot>$s->{pn}</td>";
   $out .= "<td class=bot><font size=-2>$s->{description}</font></td>\n";
+  $out .= "<td class=\"bot lb_thin\">";
   if(defined $s->{message} and $s->{message} ne ''){
-    $out .= "<td class=\"bot lb_thin\">$s->{message}</td>"
+   if(length($s->{message}) > $llen){
+   my $beg = substr $s->{message}, 0, $llen;
+   my $tail = substr $s->{message}, $llen;
+   $out .= <<LONG;
+ <details class=stdtext closed><summary
+	class=stdtext>$beg</summary>$tail</details>
+LONG
+   }else{
+    $out .= "$s->{message}"
+   }
   }else{
-    $out .= "<td class=\"bot lb_thin\">Описание проблемы отсутствует</td>";
+    $out .= "Описание проблемы отсутствует"
   }
+  $out .= "</td>\n";
   $out .= "<td class=\"bot lb_thin\">$s->{customer}</td>";
   $out .= "<td class=bot>$s->{cust_city}</td>\n";
   $out .= "<td class=\"bot lb_thin\">$s->{sla}</td>";
@@ -604,7 +640,7 @@ SELECT
    }
   });
   text_my.addEventListener("selectionchange", () => {
-   if(text_my.textLength > msglen){
+   if(text_my.textLength > msglen || msgneed[e.target.value] == 0){
 	toggle_my.disabled = false;
    }else{
 	toggle_my.disabled = true;
@@ -696,13 +732,19 @@ CASE
    $out =<<CASE_DET;
 <details open><summary>Детали по кейсу $s->{case_name}</summary>
 <table width=98%>
-<tr><th>Имя во внешней<br>системе</th><td>$s->{ext_name}</td>
-<tr><th>Заказчик</th><td>$s->{customer}, $s->{cust_city}</td></tr>
-<tr><th>Оборудование</th><td><b>$s->{sn}, $s->{pn}</b><br>
+<tr><th class=bb_thin>Имя во внешней<br>системе</th>
+  <td class=bb_thin>$s->{ext_name}</td>
+<tr><th class=bb_thin>Заказчик</th>
+  <td class=bb_thin>$s->{customer}, $s->{cust_city}</td></tr>
+<tr><th class=bb_thin>Оборудование</th>
+  <td class=bb_thin><b>$s->{sn}, $s->{pn}</b><br>
         $s->{description}</td></tr>
-<tr><th>Последнее изменение</th><td>$s->{last_up}</td></tr>
-<tr><th>SLA</th><td>$s->{sla}</td></tr>
-<tr><th>Владелец</th>
+<tr><th class=bb_thin>Неисправность</th>
+  <td class=bb_thin>$s->{message}</td></tr>
+<tr><th class=bb_thin>Последнее изменение</th>
+  <td class=bb_thin>$s->{last_up}</td></tr>
+<tr><th class=bb_thin>SLA</th><td class=bb_thin>$s->{sla}</td></tr>
+<tr><th class=bb_thin>Владелец</th>
 CASE_DET
    if($s->{creator} eq ""){ # Owner not set
      $out .= <<SETOWNER1;
@@ -715,9 +757,12 @@ SETOWNER1
 	$out .= "<input type=hidden name=case_id id=case_id value=$form_data{case_id}>\n";
      }
    }else{
-     $out .= "<td>$s->{creator}</td></tr>\n";
+     $out .= "<td class=bb_thin>$s->{creator}</td></tr>\n";
    }
-   $out .= "<tr><th>Статус</th><td>$s->{status_desc}\n$next_st</td></tr>\n";
+   $out .=<<STATUS;
+<tr><th class=bb_thin>Статус</th>
+  <td class=bb_thin>$s->{status_desc} $next_st</td></tr>
+STATUS
   }
   $out .= "</table></details>\n";
   }else{
@@ -738,9 +783,9 @@ sub get_casechat(){
  if($case_found == 1){ # case found
    $out =<<CHAT;
 $html
-<h3>Чат по кейсу</h3>
+<h3>Чат по кейсу</h3><center>
   <iframe id="Chat" title="Inline chat" width=900 height=750
-   src="$chat_link?$url"></iframe>
+   src="$chat_link?$url"></iframe></center>
 CHAT
  }
  return $out;
