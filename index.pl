@@ -260,7 +260,7 @@ SELECT DISTINCT case_id, case_name, sn, pn, description::varchar(20),
        last_up::date, customer, cust_city, begin_supp, end_supp, sla,
        ext_name, creator, status, message, created_at::date
   FROM caseinfo
-  WHERE TRUE
+  WHERE status != 'hidden'
   $cust
   $state_sql
   ORDER BY created_at
