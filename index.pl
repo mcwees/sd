@@ -351,7 +351,7 @@ LONG
 sub gethwinfo () {
 #
 # Get hardware info from contract base
- use vars qw($cust_rest $out $count $likes $retval);
+ use vars qw($cust_rest $out $count $likes $retval $sel);
  $count = 0;
  $cust_rest = $likes = $retval = "";
  if($user_data{role} eq "customer"){
@@ -373,10 +373,12 @@ SNSEL
 	if(!defined $s->{$_}){ $s->{$_} = "Undefined" }
    }
    $count++;
+   $sel = '';
+   if($form_data{selected} eq $s->{sn}){ $sel = 'checked disabled' };
    $retval .=<<HARD;
 <table width=95%>
-<tr><th align=left><input type=radio id=$s->{sn} name=selected value=$s->{sn}
-  onChange="this.form.submit()"> Serial Number</th>
+<tr><th align=left><input type=radio id=$s->{sn}
+	$sel name=selected value=$s->{sn}> Serial Number</th>
   <th align=left>$s->{sn}</th></tr>
 <tr><td>Customer</td><td>$s->{cust_name}</td></tr>
 <tr><td width=20%>Product Number</td><td>$s->{id}</td></tr>
