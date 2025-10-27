@@ -270,7 +270,7 @@ LIST
  <table width=100%>
  <tr>
   <th colspan=13>
-    <fieldset style="width:20%;display:inline; float:right;">
+    <fieldset style="width:20%;display:inline; float:right;min-width:300px">
 	<legend>Фильтрация по владельцу:</legend>
     <input type=radio id=w_owner name=w_owner value=self_own
 	$own_state{self_own} onChange="this.form.submit()"> Свои |
@@ -279,7 +279,7 @@ LIST
     <input type=radio id=w_owner name=w_owner value=all
 	$own_state{all} onChange="this.form.submit()"> Все
     </fieldset>
-    <fieldset style="width:20%; display: inline; float:right;">
+    <fieldset style="width:20%; display: inline; float:right;min-width:300px">
 	<legend>Фильтрация по статусу:</legend>
     <input type=radio id=w_status name=w_status value=unclosed
      $close_state{unclosed} onChange="this.form.submit()"> Незакрытые |
@@ -396,13 +396,13 @@ HARD
 sub inject () {
 #
 # Insert case and firs message
- use vars qw($qmsg $qname $c_name $ret $sess $c_id $ext_n);
+ use vars qw($qmsg $qname $c_name $ret $sess $c_id $ext_n $m_id);
  $qname = "'" . $form_data{sn} . "'";
  $ext_n = "''";
  if(defined $form_data{extname}){
 	$ext_n = "'" . $form_data{extname} . "'";
  }
- $q =<<CREAT;
+ $q =<<CREAT; # 1. Создаём кейс
 INSERT INTO sd_cases (user_id, sn, customer_id, sla, ext_name)
 SELECT $user_data{id} AS user_id, t1.sn, t2.id as customer_id, sla,
        $ext_n AS ext_name
@@ -417,11 +417,22 @@ CREAT
  }
  $qmsg = "''";
  $qmsg = "'" . $form_data{msg} . "'" if(defined $form_data{msg});
- $q =<<ADDMSG;
+ $q =<<ADDMSG; # 2. Записываем сообщение в чат
 INSERT INTO sd_chat (case_id, message, is_internal, user_id)
-VALUES($form_data{case_id}, $qmsg, FALSE, $user_data{id});
+VALUES($form_data{case_id}, $qmsg, FALSE, $user_data{id})
+RETURNING id;
 ADDMSG
- $sth = &sql_exec($q);
+ $sth = &sql_exec($q); #тут бы надо проверить, что всё сработало
+ while ($s = $sth->fetchrow_hashref){
+   $m_id = $s->{id} if(defined $s->{id})
+ }
+ # А тут надо дополнить таблицу истории кейса или переоформить триггер в БД.
+ $q =<<HIST;
+INSERT INTO case_status_history (case_id, status, updated_by, related_chat_id)
+VALUES($form_data{case_id}, 'created', $user_data{id}, $m_id)
+HIST
+ $sth = &sql_exec($q); # обновляем историю.
+
  $q =<<GETNAME;
 SELECT case_name FROM sd_cases WHERE id = $form_data{case_id}
 GETNAME
@@ -514,18 +525,18 @@ sub sel_owners() {
  $q = <<OWNERS;
 SELECT DISTINCT id, name FROM sd_users t1
  LEFT JOIN roles t2 ON t1.role = t2.role OR t2.role = ANY (t1.add_roles)
- WHERE can_own
+ WHERE can_own ORDER BY name
 OWNERS
  $sth = &sql_exec($q);
  while ($s = $sth->fetchrow_hashref){
-  $owners{ $s->{id} } = $s->{name}
+  $owners{ $s->{name} } = $s->{id}
  }
  $out = <<S_OWN;
 <select name=sel_owner id=sel_owner>
  <option value=0>--Выбрать владельца</option>
 S_OWN
- foreach(keys %owners){
-  $out .= "<option value=$_>$owners{$_}</option>\n";
+ foreach(sort keys %owners){
+  $out .= "<option value=$owners{$_}>$_</option>\n";
  }
  $out .= <<S_OWNFIN;
 </select>
@@ -601,7 +612,10 @@ SELECT
   $out = <<FIN02;
 
 <!-- Popup window with change status new -->
-<button onclick="openchstatus()" type="button">change status</button>
+<center>
+<button onclick="openchstatus()" type="button"
+	class=butt1>Дальнейшие действия</button>
+</center>
  <div id="popup_my" class="popup_my">
   <table class=invis width=100%>
    <tr><th align=left width=93%>Изменение статуса</th>
@@ -732,7 +746,7 @@ CASE
    $out =<<CASE_DET;
 <details open><summary>Детали по кейсу $s->{case_name}</summary>
 <table width=98%>
-<tr><th class=bb_thin>Имя во внешней<br>системе</th>
+<tr><th class=bb_thin>Номер во внешней<br>системе</th>
   <td class=bb_thin>$s->{ext_name}</td>
 <tr><th class=bb_thin>Заказчик</th>
   <td class=bb_thin>$s->{customer}, $s->{cust_city}</td></tr>
@@ -761,10 +775,10 @@ SETOWNER1
    }
    $out .=<<STATUS;
 <tr><th class=bb_thin>Статус</th>
-  <td class=bb_thin>$s->{status_desc} $next_st</td></tr>
+  <td class=bb_thin>$s->{status_desc}</td><tr>
 STATUS
   }
-  $out .= "</table></details>\n";
+  $out .= "</table></details><br>$next_st\n";
   }else{
    $out = "<p>Case $form_data{case_id} not accessible</p>";
   }
