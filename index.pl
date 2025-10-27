@@ -351,7 +351,7 @@ LONG
 sub gethwinfo () {
 #
 # Get hardware info from contract base
- use vars qw($cust_rest $out $count $likes $retval $sel);
+ use vars qw($cust_rest $out $count $likes $retval $sel $is_active $red);
  $count = 0;
  $cust_rest = $likes = $retval = "";
  if($user_data{role} eq "customer"){
@@ -361,7 +361,8 @@ sub gethwinfo () {
   $likes = "'%" . $form_data{sn} . "%'";
   $q =<<SNSEL;
 SELECT t1.sn, t1.id, cust_name, cust_city, cust_city, sla, begin_supp,
-       end_supp, description
+       end_supp, description,
+       (begin_supp,end_supp) overlaps (now(),now()) AS in_range
   FROM contract_base t1
   LEFT JOIN sn_to_customer t2 USING (sn)
   WHERE sn ilike $likes $cust_rest
@@ -372,21 +373,26 @@ SNSEL
 	   "begin_supp", "end_supp"){
 	if(!defined $s->{$_}){ $s->{$_} = "Undefined" }
    }
-   $count++;
-   $sel = '';
-   if($form_data{selected} eq $s->{sn}){ $sel = 'checked disabled' };
+   $sel = $is_active = $red = '';
+   if(!$s->{in_range}){
+	$is_active = 'disabled';
+	$red = 'style="color:red"';
+   }else{$count++;
+   }
+   if($form_data{selected} eq $s->{sn} and $s->{in_range}){
+	$sel = 'checked disabled' };
    $retval .=<<HARD;
 <table width=95%>
 <tr><th align=left><input type=radio id=$s->{sn}
-	$sel name=selected value=$s->{sn}> Serial Number</th>
+	$is_active $sel name=selected value=$s->{sn}> Serial Number</th>
   <th align=left>$s->{sn}</th></tr>
 <tr><td>Customer</td><td>$s->{cust_name}</td></tr>
 <tr><td width=20%>Product Number</td><td>$s->{id}</td></tr>
 <tr><td>Description</td><td>$s->{description}</td></tr>
 <tr><td>Cust. city</td><td>$s->{cust_city}</td></tr>
 <tr><td>SLA</td><td>$s->{sla}</td></tr>
-<tr><td>Begin support</td><td>$s->{begin_supp}</td></tr>
-<tr><td>End support</td><td>$s->{end_supp}</td></tr>
+<tr><td>Begin support</td><td $red>$s->{begin_supp}</td></tr>
+<tr><td>End support</td><td $red>$s->{end_supp}</td></tr>
 </table>
 <br>
 HARD
@@ -475,7 +481,7 @@ sub createcase () {
  if($f_lookup == 1){
    ($count, $tmp) = &gethwinfo;
  }
- if($count == 1){
+ if($count == 1 and $form_data{selected} = $form_data{sn}){
    $state = "success"; $disabled = "disabled"; $selected = "checked";
  }
  elsif($count > 1 or $count == 0){
