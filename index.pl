@@ -14,7 +14,7 @@ use DBD::Pg;
 use DateTime;
 use open qw( :std :encoding(UTF-8) );
 use vars qw($dbh $auth_user $sth $q $s $quot_name %user_data %html_blocks
-	    %form_data @qry $chat_link);
+	    %form_data @qry $chat_link %role_perm);
 
 $chat_link = "http://dss.complete.ru:2222/chat";
 %html_blocks = (
@@ -106,25 +106,23 @@ SETFORM
 
 ########################################################################
 sub checkuser(){
-# Validation of login user
+# Validation of logged user
  use vars qw($ret $s_count);
  $ret = 0;
  $auth_user = lc $ENV{REMOTE_USER};
  if(!defined $form_data{sess_id}){
   # Firstly need check session valid (found in DB)
-  # ..
-  $quot_name = "'" . $form_data{sess_id} . "'";
-  $q =<<CHECKSESS;
-SELECT count(*) from get_sess_owner($quot_name) WHERE NOT is_expire;
-CHECKSESS
-  $sth = &sql_exec($q);
-  while ($s = $sth->fetchrow_hashref){
-	$s_count = $s->{count}
-  }
-  if($s_count == 1){ # current session is valid
-  }else{ # current session isn't valid
-  }
-  
+#  $quot_name = "'" . $form_data{sess_id} . "'";
+#  $q =<<CHECKSESS;
+#SELECT count(*) from get_sess_owner($quot_name) WHERE NOT is_expire;
+#CHECKSESS
+#  $sth = &sql_exec($q);
+#  while ($s = $sth->fetchrow_hashref){
+#	$s_count = $s->{count}
+#  }
+#  if($s_count == 1){ # current session is valid
+#  }else{ # current session isn't valid
+#  } 
   $quot_name = "'" . $auth_user . "'";
   $q =<<GETUSER;
 SELECT id, name, email, role FROM sd_users
@@ -424,6 +422,7 @@ CREAT
   $form_data{case_id} = $s->{id} if(defined $s->{id});
  }
  $qmsg = "''";
+ $form_data{msg} =~ s/\'/\'\'/gm;
  $qmsg = "'" . $form_data{msg} . "'" if(defined $form_data{msg});
  $q =<<ADDMSG; # 2. Записываем сообщение в чат
 INSERT INTO sd_chat (case_id, message, is_internal, user_id)
@@ -553,9 +552,10 @@ S_OWNFIN
  return $out;
 }
 
+#####################################################################
 sub set_owner(){
 # Checks and set owner for case
- use vars qw($q $of $o_valid);
+ use vars qw($q $of $o_valid $o_name);
  $q =<<SET2;
 SELECT owner_id FROM sd_cases WHERE id = $form_data{case_id}
 SET2
@@ -566,7 +566,7 @@ SET2
  }
  if($of == 0){ #Owner not set
   $q = <<SET3;
-SELECT DISTINCT id FROM sd_users t1
+SELECT DISTINCT id, name FROM sd_users t1
  LEFT JOIN roles t2 ON t1.role = t2.role OR t2.role = ANY (t1.add_roles)
  WHERE can_own AND id = $form_data{sel_owner}
 SET3
@@ -574,13 +574,18 @@ SET3
   while ($s = $sth->fetchrow_hashref){
    if(defined $s->{id} and $s->{id} == $form_data{sel_owner}){
 	$o_valid = 1;
+	$o_name = $s->{name}
    }
   }
   if($o_valid == 1){ # Устанавливаем владельца кейсу
-   
+   $o_name = "'Владельцем кейса назначен " . $o_name . "'";
    $q = <<SET4;
+BEGIN;
 UPDATE sd_cases SET owner_id = $form_data{sel_owner}
- WHERE id = $form_data{case_id}
+ WHERE id = $form_data{case_id};
+SELECT * FROM status_change($user_data{id}, $form_data{case_id},
+  'setowner', $o_name);
+COMMIT;
 SET4
    $sth = &sql_exec($q);
   }
