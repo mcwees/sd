@@ -14,9 +14,11 @@ use DBD::Pg;
 use DateTime;
 use open qw( :std :encoding(UTF-8) );
 use vars qw($dbh $auth_user $sth $q $s $quot_name %user_data %html_blocks
-	    %form_data @qry $chat_link %role_perm);
+	    %form_data @qry $chat_link %role_perm $ext_chat_link);
 
-$chat_link = "http://dss.complete.ru:2222/chat";
+$chat_link = "http://sdext.complete.ru:2222/chat";
+$ext_chat_link = "http://ticklychat.complete.ru/chat";
+
 %html_blocks = (
         auth => '',
         info => '',
@@ -34,8 +36,18 @@ sub htmlout() {
 #
 # Formed html out
 #
- use vars qw($html $auth);
+ use vars qw($html $auth $debuginfo);
 # $auth = $html_blocks{auth};
+ if($ENV{SCRIPT_NAME} =~ /devel/){
+$debuginfo =<<FOOT;
+<!-- Info
+$html_blocks{info}
+-->
+<!-- Queries
+$html_blocks{querytime}
+-->
+FOOT
+ }else{$debuginfo = ""};
  $html =<<HTML;
 Content-type: text/html; charset="utf8"
 
@@ -60,12 +72,7 @@ $html_blocks{main}
 $html_blocks{form}
 </td></tr>
 </table>
-<!--
-$html_blocks{info}
--->
-<!--
-$html_blocks{querytime}
--->
+$debuginfo
 </form>
 </center></body>
 </html>
@@ -94,13 +101,15 @@ sub getenv() {
 SETFORM
   }
  }
- $html_blocks{info} .= "-- ENV:\n";
- foreach(sort keys %ENV){
-  $html_blocks{info} .= "$_: $ENV{$_}\n";
- }
- $html_blocks{info} .= "-- FORM:\n";
- foreach(sort keys %form_data){
-  $html_blocks{info} .= "$_: $form_data{$_}\n";
+ if($ENV{SCRIPT_FILENAME} =~ /devel/){
+  $html_blocks{info} .= "-- ENV:\n";
+  foreach(sort keys %ENV){
+   $html_blocks{info} .= "$_: $ENV{$_}\n";
+  }
+  $html_blocks{info} .= "-- FORM:\n";
+  foreach(sort keys %form_data){
+   $html_blocks{info} .= "$_: $form_data{$_}\n";
+  }
  }
 }
 
@@ -112,17 +121,6 @@ sub checkuser(){
  $auth_user = lc $ENV{REMOTE_USER};
  if(!defined $form_data{sess_id}){
   # Firstly need check session valid (found in DB)
-#  $quot_name = "'" . $form_data{sess_id} . "'";
-#  $q =<<CHECKSESS;
-#SELECT count(*) from get_sess_owner($quot_name) WHERE NOT is_expire;
-#CHECKSESS
-#  $sth = &sql_exec($q);
-#  while ($s = $sth->fetchrow_hashref){
-#	$s_count = $s->{count}
-#  }
-#  if($s_count == 1){ # current session is valid
-#  }else{ # current session isn't valid
-#  } 
   $quot_name = "'" . $auth_user . "'";
   $q =<<GETUSER;
 SELECT id, name, email, role FROM sd_users
@@ -163,6 +161,15 @@ GETINFO
      else{$user_data{$_} = ''}
    }
   }
+ }
+ $quot_name = "'" . $user_data{role} . "'";
+ $q =<<GETPRIV;
+SELECT * FROM roles WHERE role = $quot_name;
+GETPRIV
+ $sth = &sql_exec($q);
+ while ($s = $sth->fetchrow_hashref){ %role_perm = %$s }
+ if($user_data{role} eq "customer"){
+	$chat_link = $ext_chat_link;
  }
  $html_blocks{auth} =<<AUTH;
 <table class=invis>
@@ -215,14 +222,32 @@ sub menuform(){
 MENU
 }
 
+sub can_own(){
+# Return 1 if user can be an owner cases or 0 if can't
+ use vars qw($q $outb);
+ $outb = 0;
+ $q =<<BOOL;
+SELECT BOOL_OR(can_own) AS can_own
+  FROM sd_users t1 JOIN roles t2
+    ON t1.role = t2.role OR t2.role = ANY (t1.add_roles)
+ WHERE id=$user_data{id} GROUP BY id;
+BOOL
+ $sth = &sql_exec($q);
+ while ($s = $sth->fetchrow_hashref){
+  if(defined $s->{can_own}){ $outb = $s->{can_own} }
+ }
+ return $outb;
+}
+
 ######################################################################
 sub getcaselist() {
 #
 # Get cases list
- use vars qw($out $cust $sid %close_state $state_sql %own_state $llen);
+ use vars qw($out $cust $sid %close_state $state_sql %own_state $llen
+	     $if_own);
  $llen = 60;
  $sid = $form_data{sess_id};
- $cust = $state_sql = '';
+ $cust = $state_sql = $if_own = $out = '';
  %close_state = (
 	'unclosed' => 'checked',
 	'closed'   => '',
@@ -244,24 +269,33 @@ sub getcaselist() {
    $form_data{w_owner} = 'all';
  }elsif($form_data{w_owner} eq 'no_own'){
    %own_state = ('self_own' => '', 'no_own' => 'checked', 'all' => '');
-   $state_sql .= " AND creator IS NULL";
+   $state_sql .= " AND owner IS NULL";
  }elsif($form_data{w_owner} eq 'self_own'){
    %own_state = ('self_own' => 'checked', 'no_own' => '', 'all' => '');
-   $state_sql .= " AND creator = '" . $user_data{name} . "'";
+   $state_sql .= " AND owner = '" . $user_data{name} . "'";
  }
 
  if(defined $user_data{role} and $user_data{role} eq "customer"){
-   $cust = "AND customer_id = $user_data{id}"
+   $cust = "AND customer_id = $user_data{id}";
+   $chat_link = $ext_chat_link;
+ }
+ if(&can_own()){
+  $if_own =<<OWNER;
+    <input type=radio id=w_owner name=w_owner value=self_own
+        $own_state{self_own} onChange="this.form.submit()"> Свои |
+OWNER
  }
  $q =<<LIST;
 SELECT DISTINCT case_id, case_name, sn, pn, description::varchar(20),
-       last_up::date, customer, cust_city, begin_supp, end_supp, sla,
-       ext_name, creator, status, message, created_at::date
-  FROM caseinfo
+       TO_CHAR(last_up, 'DD.MM.YYYY HH24:MI') as last_up, customer,
+       cust_city, begin_supp, end_supp, sla, ext_name, creator, owner,
+       status, message, TO_CHAR(created_at, 'DD.MM.YYYY') AS created_at,
+       created_at AS cat
+  FROM case_info
   WHERE status != 'hidden'
   $cust
   $state_sql
-  ORDER BY created_at
+  ORDER BY cat
 LIST
  $sth = &sql_exec($q);
  $out .= <<THEAD;
@@ -270,8 +304,7 @@ LIST
   <th colspan=13>
     <fieldset style="width:20%;display:inline; float:right;min-width:300px">
 	<legend>Фильтрация по владельцу:</legend>
-    <input type=radio id=w_owner name=w_owner value=self_own
-	$own_state{self_own} onChange="this.form.submit()"> Свои |
+$if_own
     <input type=radio id=w_owner name=w_owner value=no_own
 	$own_state{no_own} onChange="this.form.submit()"> Без владельца |
     <input type=radio id=w_owner name=w_owner value=all
@@ -306,7 +339,7 @@ LIST
 THEAD
  while ($s = $sth->fetchrow_hashref){
   foreach("ext_name", "sn", "pn", "description", "customer", "cust_city",
-	  "sla", "end_supp", "begin_supp", "creator"){
+	  "sla", "end_supp", "begin_supp", "creator", "owner"){
     if(!defined $s->{$_}){ $s->{$_} = '' }
   }
   $out .= "<tr><td class=bot>";
@@ -317,7 +350,7 @@ THEAD
   $out .= "<td class=bot>$s->{created_at}</td>";
   $out .= "<td class=bot>$s->{last_up}</td>";
   $out .= "<td class=bot align=center>$s->{status}</td>\n";
-  $out .= "<td class=bot>$s->{creator}</td>\n";
+  $out .= "<td class=bot>$s->{owner}</td>\n";
   $out .= "<td class=\"bot lb_thin\">$s->{sn}</td><td class=bot>$s->{pn}</td>";
   $out .= "<td class=bot><font size=-2>$s->{description}</font></td>\n";
   $out .= "<td class=\"bot lb_thin\">";
@@ -596,13 +629,17 @@ SET4
 sub getnextstatus(){
 # Get next statuses
  use vars qw($q $qstat $sqlh $src $out @states $f_found %stat_desc $sel
-	     %stat_msgreq $js);
+	     %stat_msgreq $js $cust_can);
  $qstat = shift;
- $f_found = 0;
+ $f_found = 0; $cust_can = "";
+ if($user_data{role} eq "customer"){
+	$cust_can = "AND cust_can_set"
+ }
  $qstat = "'" . $qstat . "'";
  $q =<<GETNEXT;
-SELECT next_status, next_desc, need_msg, layer FROM nextstatusfull
- WHERE current_status = $qstat
+SELECT next_status, next_desc, t1.need_msg, t1.layer FROM nextstatusfull t1
+ LEFT JOIN case_statuses ON next_status = status
+ WHERE current_status = $qstat $cust_can
 GETNEXT
  $sqlh = &sql_exec($q);
  $js = "const msgneed = {\n";
@@ -675,7 +712,7 @@ SELECT
   });
  </script>
 FIN02
- }
+ } else { $out = "" }
  return $out;
 }
 
@@ -707,8 +744,8 @@ sub get_caseinfo() {
 #
 # Get case info
 #
- use vars qw($q $qsess $out $cust_f $c_found $s_owner $next_st);
- $c_found = 0;
+ use vars qw($q $qsess $out $cust_f $c_found $s_owner $next_st $ch_owner);
+ $c_found = 0; $ch_owner = '';
  $s_owner = &sel_owners;
  if(defined $form_data{case_id} and $form_data{case_id} > 0){
   if(defined $form_data{sel_owner} and $form_data{sel_owner} > 0){
@@ -735,7 +772,7 @@ CFOUND
    }
    # get status and get possible next statuses
   $q = <<GETST;
-SELECT shortstatus FROM caseinfo
+SELECT shortstatus FROM case_info
  WHERE case_id = $form_data{case_id} $cust_f
 GETST
   $sth = &sql_exec($q);
@@ -744,16 +781,17 @@ GETST
   }
   $next_st = &getnextstatus(lc($next_st));
   $q =<<CASE;
-SELECT case_id, case_name, sn, pn, t1.description, last_up::date,
-       customer, cust_city, begin_supp, end_supp, sla,
+SELECT case_id, case_name, sn, pn, t1.description,
+       TO_CHAR(last_up, 'DD.MM.YYYY HH24:MI') as last_up,
+       customer, cust_city, begin_supp, end_supp, sla, owner,
        creator, t2.status, message, ext_name, t2.description AS status_desc
-  FROM caseinfo t1
+  FROM case_info t1
   LEFT JOIN case_statuses t2 ON t2.status = t1.shortstatus
   WHERE case_id = $form_data{case_id} $cust_f
 CASE
   $sth = &sql_exec($q);
   while ($s = $sth->fetchrow_hashref){
-   foreach("creator", "customer", "cust_city", "ext_name"){
+   foreach("creator", "owner", "customer", "cust_city", "ext_name"){
 	if(!defined $s->{$_}){$s->{$_} = ""}
    }
    $out =<<CASE_DET;
@@ -773,7 +811,7 @@ CASE
 <tr><th class=bb_thin>SLA</th><td class=bb_thin>$s->{sla}</td></tr>
 <tr><th class=bb_thin>Владелец</th>
 CASE_DET
-   if($s->{creator} eq ""){ # Owner not set
+   if($s->{owner} eq ""){ # Owner not set
      $out .= <<SETOWNER1;
 <td>Назначить: $s_owner</td></tr>
 SETOWNER1
@@ -783,8 +821,13 @@ SETOWNER1
      if(!defined $form_data{case_id}){
 	$out .= "<input type=hidden name=case_id id=case_id value=$form_data{case_id}>\n";
      }
-   }else{
-     $out .= "<td class=bb_thin>$s->{creator}</td></tr>\n";
+   }else{ # Owner was set
+     if($role_perm{can_change_owner}){
+	$ch_owner = <<CHOWN;
+<button type="button">Изменить владельца</button>
+CHOWN
+     }
+     $out .= "<td class=bb_thin>$s->{owner}. $ch_owner</td></tr>\n";
    }
    $out .=<<STATUS;
 <tr><th class=bb_thin>Статус</th>
