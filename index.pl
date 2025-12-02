@@ -60,7 +60,7 @@ Content-type: text/html; charset="utf8"
 <form method="POST" action="$ENV{SCRIPT_NAME}">
 <table width=60% class=shadow>
 <tr class=bot><td><img src=/icons/dss-logo.png></td>
-  <td><h1>DSS ServiceDesk</h1></td>
+  <td><h1>Сервисный портал КОМПЛИТ</h1></td>
     <td align=right>$html_blocks{auth}</td></tr>
 
 <tr><td colspan=3 align=center>
@@ -209,15 +209,18 @@ sub menuform(){
  $sid = $form_data{sess_id};
  $html_blocks{menu} =<<MENU;
  <table class=invis width=95%>
-  <tr><td class=menu width=33%>
+  <tr><td class=menu width=25%>
 	<a href=$ENV{SCRIPT_NAME}?act=create>
-	Создать кейс для оборудования</a></td>
-   <td class=menu width=33%>
+	Создать новую заявку</a></td>
+   <td class=menu width=25%>
 	<a href=$ENV{SCRIPT_NAME}?act=list>
-	Просмотр списка кейсов</a></td>
-   <td class=menu width=33%>
+	Список заявок</a></td>
+   <td class=menu width=25%>
 	<a href=$ENV{SCRIPT_NAME}?act=defchat>
-	Написать в поддержку</a></td></tr>
+	Помощь</a></td>
+   <td class=menu width=25%>
+	<a href=$ENV{SCRIPT_NAME}?act=account>
+	Личный кабинет<a/></td></tr>
  </table>
 MENU
 }
@@ -488,7 +491,7 @@ $qmsg
 -->
 <p>Кейс $c_name для оборудования $form_data{sn} создан.</p>
 <a href=$ENV{SCRIPT_NAME}?act=casechat&case_id=$c_id>
-Перейти к чату по кейсу</a>
+Перейти к чату по заявке</a>
 SUMMARY
  return $ret
 }
@@ -560,6 +563,33 @@ CREAT1
  return $out;
 }
 
+sub ch_owner_list() {
+ use vars qw($q %owners $out $c_owner);
+ $c_owner = shift;
+ $c_owner = "AND name != '" . $c_owner . "'";
+ $q = <<OWNERS;
+SELECT DISTINCT id, name FROM sd_users t1
+ LEFT JOIN roles t2 ON t1.role = t2.role OR t2.role = ANY (t1.add_roles)
+ WHERE can_own $c_owner ORDER BY name
+OWNERS
+ $sth = &sql_exec($q);
+ while ($s = $sth->fetchrow_hashref){
+  $owners{ $s->{name} } = $s->{id}
+ }
+ $out = <<C_OWN;
+<select name=ch_owner id=ch_owner>
+ <option value=0>--Новый владелец</option>
+C_OWN
+ foreach(sort keys %owners){
+  $out .= "<option value=$owners{$_}>$_</option>\n";
+ }
+ $out .= <<C_OWNFIN;
+</select>
+C_OWNFIN
+ return $out;
+}
+
+#################################################################
 sub sel_owners() {
  use vars qw($q %owners $out);
  $q = <<OWNERS;
@@ -622,6 +652,36 @@ COMMIT;
 SET4
    $sth = &sql_exec($q);
   }
+ }
+}
+
+#####################################################################
+sub change_owner(){
+# Checks and change owner for case
+ use vars qw($q $o_valid $o_name);
+ $o_valid = 0;
+ $q =<<CHO1;
+SELECT DISTINCT id, name FROM sd_users t1
+ LEFT JOIN roles t2 ON t1.role = t2.role OR t2.role = ANY (t1.add_roles)         WHERE can_own AND id = $form_data{ch_owner}
+CHO1
+ $sth = &sql_exec($q);
+ while ($s = $sth->fetchrow_hashref){
+  if(defined $s->{id} and $s->{id} == $form_data{ch_owner}){
+	$o_valid = 1;
+	$o_name = $s->{name}
+  }
+ }
+ if($o_valid == 1){
+  $o_name = "'Владельцем кейса назначен " . $o_name . "'";
+  $q =<<CHO2;
+BEGIN;
+UPDATE sd_cases SET owner_id = $form_data{ch_owner}
+ WHERE id = $form_data{case_id};
+SELECT * FROM status_change($user_data{id}, $form_data{case_id},
+  'changeowner', $o_name);
+COMMIT;
+CHO2
+  $sth = &sql_exec($q);
  }
 }
 
@@ -744,29 +804,36 @@ sub get_caseinfo() {
 #
 # Get case info
 #
- use vars qw($q $qsess $out $cust_f $c_found $s_owner $next_st $ch_owner);
- $c_found = 0; $ch_owner = '';
- $s_owner = &sel_owners;
+ use vars qw($q $qsess $out $cust_f $c_found $s_owner $next_st $ch_owner $js
+	     $owner_name $get_list);
+ $c_found = 0; $ch_owner = $js = $s_owner = $get_list = '';
  if(defined $form_data{case_id} and $form_data{case_id} > 0){
   if(defined $form_data{sel_owner} and $form_data{sel_owner} > 0){
    &set_owner; # с морды пришел запрос на установку владельца
   }
-#  if(defined $form_data{nextstate} and $form_data{nextstate} ne ""){
-#   &setnextstatus; # с морды пришел запрос на смену статуса
-#  }
+  if(defined $form_data{ch_owner} and $form_data{ch_owner} > 0){
+   &change_owner # С морды пришел запрос на смену владельца
+  }
   $cust_f = "";
   if(defined $user_data{role} and $user_data{role} eq "customer"){
     $cust_f = "AND customer_id = $user_data{id}";
   }
   $q =<<CFOUND;
-SELECT count(DISTINCT case_id) FROM caseinfo
+SELECT count(*), owner FROM case_info
  WHERE case_id = $form_data{case_id} $cust_f
+ GROUP BY owner
 CFOUND
   $sth = &sql_exec($q);
   while ($s = $sth->fetchrow_hashref){
-    $c_found = $s->{count} || 0
+    $c_found = $s->{count} || 0;
+    $owner_name = $s->{owner} || "";
   }
   if($c_found == 1){ # Case found
+   if($owner_name ne ""){
+      $get_list = &ch_owner_list($owner_name);
+   }else{
+      $s_owner = &sel_owners;
+   }
    if(defined $form_data{nextstate} and $form_data{nextstate} ne ""){
     &setnextstatus;
    }
@@ -795,7 +862,7 @@ CASE
 	if(!defined $s->{$_}){$s->{$_} = ""}
    }
    $out =<<CASE_DET;
-<details open><summary>Детали по кейсу $s->{case_name}</summary>
+<details open><summary>Детали по заявке $s->{case_name}</summary>
 <table width=98%>
 <tr><th class=bb_thin>Номер во внешней<br>системе</th>
   <td class=bb_thin>$s->{ext_name}</td>
@@ -822,9 +889,39 @@ SETOWNER1
 	$out .= "<input type=hidden name=case_id id=case_id value=$form_data{case_id}>\n";
      }
    }else{ # Owner was set
-     if($role_perm{can_change_owner}){
+     $owner_name = $s->{owner};
+     if($role_perm{can_change_owner}){ # User can change owner
 	$ch_owner = <<CHOWN;
-<button type="button">Изменить владельца</button>
+<button type="button" onclick="openchowner()">Изменить владельца</button>
+<div id="chowner_my" class="chowner_my">
+ <table class=invis width=100%>
+  <tr><th align=left width=93%>Смена владельца</th>
+      <th align=center><span onclick="closechowner()"
+	  style="cursor:default; font-size:16pt;">×</span></th></tr>
+  <tr><td colspan=2>
+	<br>$get_list<br></td></tr>
+  <tr><td colspan=2 align=center>
+	<label for=chownmsg>Причина замены</label><br>
+	<textarea cols=40 rows=10 id=chownmsg name=chownmsg></textarea>
+	</td></tr>
+  <tr><td colspan=2 align=center>
+	<button onclick="closechowner()" id=modowner name=modowner
+	 disabled>Изменить</button></td></tr>
+ </table>
+</div>
+<script>
+ const chowner_my = document.getElementById('chowner_my');
+ const text_chown = document.getElementById('chownmsg');
+ const toggle_chown = document.getElementById('modowner');
+ var chown_msg_len = 10;
+ function openchowner(){chowner_my.classList.add("chowner_my-open");}
+ function closechowner(){chowner_my.classList.remove("chowner_my-open");}
+ text_chown.addEventListener("selectionchange", () => {
+   if(text_chown.textLength > chown_msg_len){toggle_chown.disabled = false;}
+   else{toggle_chown.disabled = true;}
+ });
+</script>
+
 CHOWN
      }
      $out .= "<td class=bb_thin>$s->{owner}. $ch_owner</td></tr>\n";
@@ -853,7 +950,7 @@ sub get_casechat(){
  if($case_found == 1){ # case found
    $out =<<CHAT;
 $html
-<h3>Чат по кейсу</h3><center>
+<h3>Чат по заявке</h3><center>
   <iframe id="Chat" title="Inline chat" width=900 height=750
    src="$chat_link?$url"></iframe></center>
 CHAT
@@ -873,10 +970,27 @@ sub mainform(){
    $html_blocks{main} = &getcaselist;
   }
   elsif($form_data{act} eq "defchat"){ # There should be jump to default chat
-   $html_blocks{main} = "<h2>Здесь будет просто чат</h2>\n";
+   $html_blocks{main} =<<CH_HEAD;
+<h3>Для заказчиков с оборудованием на активной поддержке здесь будет
+чат со службой поддержки</h3>
+CH_HEAD
   }
   elsif($form_data{act} eq "casechat"){ # There is chat with case
    $html_blocks{main} = &get_casechat;
+  }
+  elsif($form_data{act} eq "account"){ # There is personal info and other
+   $html_blocks{main} =<<ACCNT;
+<h3>Личный кабинет</h3>
+<ul>
+ <li>Состав оборудования на поддержке;</li>
+ <li>Стартовый аудит;</li>
+ <li>Регулярные сервисы;</li>
+ <li>Прошивки;</li>
+ <li>Статистика;</li>
+ <li>Облачное хранилище;</li>
+</ul>
+<p>* Пункты доступны в соответствии с условиями поддержки</p>
+ACCNT
   }
  }
 }
