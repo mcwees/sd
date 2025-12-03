@@ -672,7 +672,10 @@ CHO1
   }
  }
  if($o_valid == 1){
-  $o_name = "'Владельцем кейса назначен " . $o_name . "'";
+  $o_name =<<CHO3;
+'Владельцем кейса назначен $o_name.
+$form_data{chownmsg}'
+CHO3
   $q =<<CHO2;
 BEGIN;
 UPDATE sd_cases SET owner_id = $form_data{ch_owner}
