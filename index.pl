@@ -59,8 +59,8 @@ Content-type: text/html; charset="utf8"
 <body><center>
 <form method="POST" action="$ENV{SCRIPT_NAME}">
 <table width=60% class=shadow>
-<tr class=bot><td><img src=/icons/dss-logo.png></td>
-  <td><h1>Сервисный портал КОМПЛИТ</h1></td>
+<tr class=bot><td><img src=/icons/dss-logo.png width=180></td>
+  <td><h2>Портал сервисного обслуживания КОМПЛИТ</h2></td>
     <td align=right>$html_blocks{auth}</td></tr>
 
 <tr><td colspan=3 align=center>
@@ -175,7 +175,9 @@ GETPRIV
 <table class=invis>
 <tr><td align=right>Пользователь</td><td>$user_data{name}</td></tr>
 <tr><td align=right>Электропочта</td><td>$user_data{email}</td></tr>
+<!--
 <tr><td align=right>Роль</td><td>$user_data{role}</td></tr>
+-->
 </table>
 <input type=hidden id=sess_id name=sess_id value=$user_data{session}>
 AUTH
@@ -964,7 +966,23 @@ CHAT
 ###################################################################
 sub mainform(){
  use vars qw();
- $html_blocks{main} = "<h3>Здесь будет приветственная страница</h3>";
+ $html_blocks{main} =<<WELC;
+<h3 class=wel>Добро пожаловать!</h3>
+<p class=wel>Добро пожаловать на портал сервисной поддержки Компании КОМПЛИТ.
+Наша платформа предназначена для профессионального управления инцидентами
+и запросами на обслуживание серверного оборудования, систем хранения
+данных (СХД) и сетевых компонентов.
+Здесь вы можете в соответствии с регламентом зарегистрировать заявку,
+обеспечить приоритизацию и направить её профильным специалистам.</p>
+
+<p class=wel>Мы отвечаем за соблюдение соглашений об уровне обслуживания (SLA),
+прозрачность каждого этапа работ и безопасный обмен документацией.
+Портал интегрирован с корпоративной системой мониторинга, управления
+запчастями и защищённым облаком для хранения и обмена данными.</p>
+
+<p class=wel>Для начала работы выберите интересующий пункт из меню выше.</p>
+
+WELC
  if(defined $form_data{act}){ # Not default page
   if($form_data{act} eq "create"){ # There should be create case proc
    $html_blocks{main} = &createcase;
@@ -974,8 +992,17 @@ sub mainform(){
   }
   elsif($form_data{act} eq "defchat"){ # There should be jump to default chat
    $html_blocks{main} =<<CH_HEAD;
-<h3>Для заказчиков с оборудованием на активной поддержке здесь будет
-чат со службой поддержки</h3>
+<h3 class=wel>[ Страница находится в разработке ]</h3>
+<p class=wel>При возникновении вопросов по использованию потрала или Вашему
+контракту на техническую поддержку, просьба обращаться к Вашему выделенному
+менеджеру по технической поддержке.</p>
+
+<p class=wel>Альтернативные способы открытия заявок:
+<ul>
+ <li>по телефону +7 (812) 740-30-13; 8 800 555 5540 (бесплатно на территории
+     РФ) через Контакт-центр КОМПЛИТ</li>
+ <li>по электронной почте support\@complete.ru</li>
+</ul></p>
 CH_HEAD
   }
   elsif($form_data{act} eq "casechat"){ # There is chat with case
@@ -983,16 +1010,17 @@ CH_HEAD
   }
   elsif($form_data{act} eq "account"){ # There is personal info and other
    $html_blocks{main} =<<ACCNT;
-<h3>Личный кабинет</h3>
+<h3 class=wel>Личный кабинет [ Страница находится в разработке ]</h3>
+<p class=wel>
 <ul>
- <li>Состав оборудования на поддержке;</li>
- <li>Стартовый аудит;</li>
- <li>Регулярные сервисы;</li>
- <li>Прошивки;</li>
- <li>Статистика;</li>
- <li>Облачное хранилище;</li>
-</ul>
-<p>* Пункты доступны в соответствии с условиями поддержки</p>
+ <li><a href="?act=account">Состав оборудования на поддержке</a></li>
+ <li><a href="?act=account">Стартовый аудит</a></li>
+ <li><a href="?act=account">Регулярные сервисы</a></li>
+ <li><a href="?act=account">Прошивки</a></li>
+ <li><a href="?act=account">Статистика</a></li>
+ <li><a href="?act=account">Облачное хранилище</a></li>
+</ul></p>
+<p class=wel>* Пункты доступны в соответствии с условиями поддержки</p>
 ACCNT
   }
  }
