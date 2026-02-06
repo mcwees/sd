@@ -101,6 +101,9 @@ sub getenv() {
 SETFORM
   }
  }
+}
+
+sub debuginfo(){
  if($ENV{SCRIPT_FILENAME} =~ /devel/){
   $html_blocks{info} .= "-- ENV:\n";
   foreach(sort keys %ENV){
@@ -110,29 +113,73 @@ SETFORM
   foreach(sort keys %form_data){
    $html_blocks{info} .= "$_: $form_data{$_}\n";
   }
+  $html_blocks{info} .= "-- USER:\n";
+  foreach(sort keys %user_data){
+   $html_blocks{info} .= "$_: $user_data{$_}\n";
+  }
  }
+}
+
+sub getuser(){
+ use vars qw($user $qname $alarm);
+ $alarm = 0;
+ $user = lc $ENV{REMOTE_USER};
+ $qname = "'" . $user . "'";
+ $q =<<GETUSR;
+SELECT id, name, email, role FROM sd_users
+WHERE name = $qname AND is_active LIMIT 1;
+GETUSR
+ $sth = &sql_exec($q);
+ while ($s = $sth->fetchrow_hashref){
+  foreach("id", "name", "email", "role"){
+   if(defined $s->{$_}){$user_data{$_} = $s->{$_}}
+   else{$user_data{$_} = ''; $alarm = 1}
+  }
+ }
+ return $alarm
+};
+
+sub sess_validation(){
+ use vars qw($quot $v $alarm);
+ $v = $alarm = 0;
+ if(!defined $form_data{sess_id} and defined $user_data{session}){
+  $form_data{sess_id} = $user_data{session}
+ }
+ if(defined $form_data{sess_id}){ # session-id found, need ckecks
+  $quot = "'" . $form_data{sess_id} . "'";
+  $q = "SELECT count(*) FROM get_sess_owner($quot) WHERE NOT is_expire;";
+  $sth = &sql_exec($q);
+  while ($s = $sth->fetchrow_hashref){
+   if(defined $s->{count}){$v = $s->{count}}
+  }
+ }
+ if($v != 1){ # Valid session not found
+  if(defined $user_data{id}){ # if defined user id - request new session
+   $q = "SELECT get_sess FROM get_sess(" . $user_data{id} . ");";
+   $sth = &sql_exec($q);
+   while ($s = $sth->fetchrow_hashref){
+    if(defined $s->{get_sess}){$form_data{sess_id} = $s->{get_sess}}
+    else{ $form_data{sess_id} = ''; $alarm = 1 }
+   }
+  }
+ }
+ return $alarm;
 }
 
 ########################################################################
 sub checkuser(){
 # Validation of logged user
  use vars qw($ret $s_count);
- $ret = 0;
+ $ret = 0; $form_data{sess_valid} = 'undef';
+ # Обязательная валидация пользователя в БД
+ if(&getuser == 0){$user_data{user_validation} = 'success'}
+ else{$user_data{user_validation} = 'failed'}
+ # Обязательная проверка сессии пользователя
+ if(sess_validation() == 0){$form_data{sess_valid} = 'success'}
+ else{$form_data{sess_valid} = 'failed'}
+
  $auth_user = lc $ENV{REMOTE_USER};
- if(!defined $form_data{sess_id}){
-  # Firstly need check session valid (found in DB)
-  $quot_name = "'" . $auth_user . "'";
-  $q =<<GETUSER;
-SELECT id, name, email, role FROM sd_users
-WHERE name = $quot_name AND is_active LIMIT 1;
-GETUSER
-  $sth = &sql_exec($q);
-  while ($s = $sth->fetchrow_hashref){
-   foreach("id", "name", "email", "role"){
-     if(defined $s->{$_}){$user_data{$_} = $s->{$_}}
-     else{$user_data{$_} = ''}
-   }
-  }
+ if(!defined $form_data{sess_id}){ # 
   $user_data{session} = '';
   if($auth_user eq $user_data{name}){ #User registered and active
    $q = "SELECT * FROM get_sess(" . $user_data{id} . ");";
@@ -391,7 +438,7 @@ sub gethwinfo () {
  $count = 0;
  $cust_rest = $likes = $retval = "";
  if($user_data{role} eq "customer"){
-   $cust_rest = "AND t2.id = $user_data{user_id}"
+   $cust_rest = "AND t2.id = $user_data{id}"
  }
  if(defined $form_data{sn} and $form_data{sn} ne ""){
   $likes = "'%" . $form_data{sn} . "%'";
@@ -415,7 +462,8 @@ SNSEL
 	$red = 'style="color:red"';
    }else{$count++;
    }
-   if($form_data{selected} eq $s->{sn} and $s->{in_range}){
+   if(defined $form_data{selected} and $form_data{selected} eq $s->{sn} and
+	$s->{in_range}){
 	$sel = 'checked disabled' };
    $retval .=<<HARD;
 <table width=95%>
@@ -557,7 +605,7 @@ CREAT2
   $out .= <<CREAT1;
 Введите серийный номер оборудования
  <input name=sn id=sn value="$curr" size=16>
- <input type=button value="Lookup" onClick="this.form.submit()">
+ <input type=button value="Поиск" onClick="this.form.submit()">
  <input type=hidden id=c_st name=c_st value=$state>
 CREAT1
   $out .= $tmp;
@@ -1038,7 +1086,11 @@ $dbh = DBI->connect("dbi:Pg:dbname=sddb","sdadm","ywTsPhO6f",
 
 &getenv();
 &checkuser();
-if(defined $user_data{session} and $user_data{session} ne ""){
+&debuginfo();
+if(defined $user_data{user_validation} and
+   $user_data{user_validation} eq 'success' and
+   defined $form_data{sess_valid} and
+   $form_data{sess_valid} eq 'success'){
  &menuform();
  &mainform();
 }
