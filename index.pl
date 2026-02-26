@@ -122,7 +122,7 @@ sub debuginfo(){
 
 sub getuser(){
  use vars qw($user $qname $alarm);
- $alarm = 0;
+ $alarm = 1;
  $user = lc $ENV{REMOTE_USER};
  $qname = "'" . $user . "'";
  $q =<<GETUSR;
@@ -132,8 +132,10 @@ GETUSR
  $sth = &sql_exec($q);
  while ($s = $sth->fetchrow_hashref){
   foreach("id", "name", "email", "role"){
-   if(defined $s->{$_}){$user_data{$_} = $s->{$_}}
-   else{$user_data{$_} = ''; $alarm = 1}
+   if(defined $s->{$_}){
+	$user_data{$_} = $s->{$_};
+	$alarm = 0;
+   }
   }
  }
  return $alarm
@@ -215,7 +217,7 @@ SELECT * FROM roles WHERE role = $quot_name;
 GETPRIV
  $sth = &sql_exec($q);
  while ($s = $sth->fetchrow_hashref){ %role_perm = %$s }
- if($user_data{role} eq "customer"){
+ if($ENV{HTTP_HOST} eq "tickly.complete.ru"){
 	$chat_link = $ext_chat_link;
  }
  $html_blocks{auth} =<<AUTH;
@@ -423,7 +425,9 @@ LONG
   $out .= "</td>\n";
   $out .= "<td class=\"bot lb_thin\">$s->{customer}</td>";
   $out .= "<td class=bot>$s->{cust_city}</td>\n";
-  $out .= "<td class=\"bot lb_thin\">$s->{sla}</td>";
+  my $sla_color = "'bot lb_thin'";
+  if($s->{sla} =~ /CTR/){ $sla_color = "'bot lb_thin bb_red'" }
+  $out .= "<td class=$sla_color>$s->{sla}</td>";
   $out .= "<!-- <td class=bot>$s->{begin_supp}</td>";
   $out .= "<td class=bot>$s->{end_supp}</td> --></tr>\n";
  }
@@ -840,7 +844,8 @@ SELECT next_status FROM sd_cases t1
 SET01
  $sth = &sql_exec($q);
  while ($s = $sth->fetchrow_hashref){
-   $sf = $s->{next_status} || ""
+   if(defined $s->{next_status}){$sf = $s->{next_status}}
+  else{ $sf = "" }
  }
  if($sf ne ""){
   $sf = "'" . $sf . "'"; $textval = "'" . $form_data{textmsg} . "'";
@@ -904,7 +909,8 @@ GETST
 SELECT case_id, case_name, sn, pn, t1.description,
        TO_CHAR(last_up, 'DD.MM.YYYY HH24:MI') as last_up,
        customer, cust_city, begin_supp, end_supp, sla, owner,
-       creator, t2.status, message, ext_name, t2.description AS status_desc
+       creator, t2.status, message, ext_name, t2.description AS status_desc,
+       TO_CHAR(created_at, 'DD.MM.YYYY HH24:MI') as created_at
   FROM case_info t1
   LEFT JOIN case_statuses t2 ON t2.status = t1.shortstatus
   WHERE case_id = $form_data{case_id} $cust_f
@@ -914,6 +920,8 @@ CASE
    foreach("creator", "owner", "customer", "cust_city", "ext_name"){
 	if(!defined $s->{$_}){$s->{$_} = ""}
    }
+   my $sla_col = "bb_thin";
+   if($s->{sla} =~ /CTR/){ $sla_col = "'bb_thin bb_red'" };
    $out =<<CASE_DET;
 <details open><summary>Детали по заявке $s->{case_name}</summary>
 <table width=98%>
@@ -926,9 +934,11 @@ CASE
         $s->{description}</td></tr>
 <tr><th class=bb_thin>Неисправность</th>
   <td class=bb_thin>$s->{message}</td></tr>
+<tr><th class=bb_thin>Дата Создания</th>
+  <td class=bb_thin>$s->{created_at}</td></tr>
 <tr><th class=bb_thin>Последнее изменение</th>
   <td class=bb_thin>$s->{last_up}</td></tr>
-<tr><th class=bb_thin>SLA</th><td class=bb_thin>$s->{sla}</td></tr>
+<tr><th class=bb_thin>SLA</th><td class=$sla_col>$s->{sla}</td></tr>
 <tr><th class=bb_thin>Владелец</th>
 CASE_DET
    if($s->{owner} eq ""){ # Owner not set

@@ -57,7 +57,7 @@ SELECT owner, count(*), round(count(*)::numeric/20,1) as per_day,
        round(avg(livetime),1) as avg_live,
        round(avg(fixtime),1) as avg_fix,
        round(avg(diagtime),1) as avg_diag,
-       round(max(fixtime),1) as max_diag,
+       round(max(diagtime),1) as max_diag,
        round(count(*)::numeric/20 * avg(diagtime),1) as parallel
   FROM stat_monthly
   WHERE owner not in ('lyanguzov_dv', 'sokko_aa')
