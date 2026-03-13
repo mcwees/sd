@@ -17,7 +17,7 @@ use vars qw($dbh $auth_user $sth $q $s $quot_name %user_data %html_blocks
 	    %form_data @qry $chat_link %role_perm $ext_chat_link);
 
 $chat_link = "http://sdext.complete.ru:2222/chat";
-$ext_chat_link = "http://ticklychat.complete.ru/chat";
+$ext_chat_link = "https://ticklychat.complete.ru/chat";
 
 %html_blocks = (
         auth => '',
@@ -90,6 +90,9 @@ sub getenv() {
  if(defined $ENV{CONTENT_LENGTH} and $ENV{CONTENT_LENGTH} > 0){
   read(STDIN, my $raw_post, $ENV{CONTENT_LENGTH});
   @qry = split "&", $raw_post}
+ if($ENV{HTTP_HOST} eq "tickly.complete.ru"){
+	$chat_link = $ext_chat_link;
+ }
  foreach(@qry){
   ($k, $v) = split "=", $_;
   $v =~ s/\+/ /g;
@@ -143,7 +146,7 @@ GETUSR
 
 sub sess_validation(){
  use vars qw($quot $v $alarm);
- $v = $alarm = 0;
+ $v = 0; $alarm = 1;
  if(!defined $form_data{sess_id} and defined $user_data{session}){
   $form_data{sess_id} = $user_data{session}
  }
@@ -152,7 +155,10 @@ sub sess_validation(){
   $q = "SELECT count(*) FROM get_sess_owner($quot) WHERE NOT is_expire;";
   $sth = &sql_exec($q);
   while ($s = $sth->fetchrow_hashref){
-   if(defined $s->{count}){$v = $s->{count}}
+   if(defined $s->{count}){
+	$v = $s->{count};
+	if($v == 1){$alarm = 0}
+   }
   }
  }
  if($v != 1){ # Valid session not found
@@ -160,8 +166,10 @@ sub sess_validation(){
    $q = "SELECT get_sess FROM get_sess(" . $user_data{id} . ");";
    $sth = &sql_exec($q);
    while ($s = $sth->fetchrow_hashref){
-    if(defined $s->{get_sess}){$form_data{sess_id} = $s->{get_sess}}
-    else{ $form_data{sess_id} = ''; $alarm = 1 }
+    if(defined $s->{get_sess}){
+	$form_data{sess_id} = $s->{get_sess};
+	$alarm = 0
+    }
    }
   }
  }
@@ -177,7 +185,7 @@ sub checkuser(){
  if(&getuser == 0){$user_data{user_validation} = 'success'}
  else{$user_data{user_validation} = 'failed'}
  # Обязательная проверка сессии пользователя
- if(sess_validation() == 0){$form_data{sess_valid} = 'success'}
+ if(&sess_validation == 0){$form_data{sess_valid} = 'success'}
  else{$form_data{sess_valid} = 'failed'}
 
  $auth_user = lc $ENV{REMOTE_USER};
@@ -217,9 +225,9 @@ SELECT * FROM roles WHERE role = $quot_name;
 GETPRIV
  $sth = &sql_exec($q);
  while ($s = $sth->fetchrow_hashref){ %role_perm = %$s }
- if($ENV{HTTP_HOST} eq "tickly.complete.ru"){
-	$chat_link = $ext_chat_link;
- }
+# if($ENV{HTTP_HOST} eq "tickly.complete.ru"){
+#	$chat_link = $ext_chat_link;
+# }
  $html_blocks{auth} =<<AUTH;
 <table class=invis>
 <tr><td align=right>Пользователь</td><td>$user_data{name}</td></tr>
@@ -298,9 +306,14 @@ sub getcaselist() {
 #
 # Get cases list
  use vars qw($out $cust $sid %close_state $state_sql %own_state $llen
-	     $if_own);
+	     $if_own $cust_filter);
  $llen = 60;
  $sid = $form_data{sess_id};
+ $cust_filter =<<CFIL;
+<br><input name="customer" type="text" id="customer-search"
+placeholder="Customer.." class="table-search-filters"
+size=15>
+CFIL
  $cust = $state_sql = $if_own = $out = '';
  %close_state = (
 	'unclosed' => 'checked',
@@ -332,6 +345,7 @@ sub getcaselist() {
  if(defined $user_data{role} and $user_data{role} eq "customer"){
    $cust = "AND customer_id = $user_data{id}";
    $chat_link = $ext_chat_link;
+   $cust_filter = "";
  }
  if(&can_own()){
   $if_own =<<OWNER;
@@ -353,7 +367,63 @@ SELECT DISTINCT case_id, case_name, sn, pn, description::varchar(20),
 LIST
  $sth = &sql_exec($q);
  $out .= <<THEAD;
- <table width=100%>
+<script defer>
+document.addEventListener('DOMContentLoaded', () => {
+    const sourceList = Array.from(
+	document.querySelectorAll("#main-table tbody tr"));
+    const statusFilter = (value, item) => {
+        if (!value) return true;
+        const cell = item.querySelector("td:nth-child(5)"); 
+        if (!cell) return false; 
+        return cell.textContent.toLowerCase().trim().includes(
+		value.toLowerCase().trim());
+    };
+    const ownerFilter = (value, item) => {
+        if (!value) return true;
+        const cell = item.querySelector("td:nth-child(6)");
+        if (!cell) return false;
+        return cell.textContent.toLowerCase().trim().includes(
+		value.toLowerCase().trim());
+    };
+    const customerFilter = (value, item) => {
+        if (!value) return true;
+        const cell = item.querySelector("td:nth-child(11)");
+        if (!cell) return false;
+        return cell.textContent.toLowerCase().trim().includes(
+		value.toLowerCase().trim());
+    };
+    const serialnoFilter = (value, item) => {
+	if (!value) return true;
+	const cell = item.querySelector("td:nth-child(7)");
+	if (!cell) return false;
+	return cell.textContent.toLowerCase().trim().includes(
+		value.toLowerCase().trim());
+    };
+    const currentFilters = { 
+        status: '',
+        owner: '', 
+        customer: '',
+	serialno: ''
+    };
+    const mainFilter = ({status, owner, customer, serialno}, item) => {
+        return statusFilter(status, item) && ownerFilter(owner, item) && customerFilter(customer, item) && serialnoFilter(serialno, item);
+    };
+    window.addEventListener('input', event => {
+        if (event.target.matches('.table-search-filters')) {
+            currentFilters[event.target.name] = event.target.value;   
+            
+            let visibleCount = 0;
+            sourceList.forEach(item => {
+                const isVisible = mainFilter(currentFilters, item);
+                item.style.display = isVisible ? '' : 'none';
+                if (isVisible) visibleCount++;
+            });
+        }
+    });
+});
+</script>
+ <table width=100% id=main-table>
+ <thead>
  <tr>
   <th colspan=13>
     <fieldset style="width:20%;display:inline; float:right;min-width:300px">
@@ -384,12 +454,21 @@ $if_own
  </tr>
  <tr>
   <th>#</th><th>Ext</th><th>Created</th><th>Last Up</th>
-	<th>Status</th><th>Owner</th>
-  <th class="lb_thin">SN</th><th>PN</th><th>HW Desc</th>
+	<th>Status<br><input name="status" type="text" id="status-search"
+	placeholder="Status.." class="table-search-filters" size=12></th>
+  <th>Owner<br><input name="owner" type="text" id="owner-search" size=12
+	placeholder="Owner.." class="table-search-filters"></th>
+  <th class="lb_thin">SN<br><input name="serialno" type="text"
+	id="serialno-search" size=10 placeholder="SN.."
+	class="table-search-filters"></th>
+  <th>PN</th><th>HW Desc</th>
 <!--  <th class="lb_thin">Issue</th> -->
-  <th class="lb_thin">Customer</th><th>City</th>
+  <th class="lb_thin">Customer $cust_filter</th>
+  <th>City</th>
 <!--  <th class="lb_thin">SLA</th> -->
  </tr>
+ </thead>
+ <tbody>
 THEAD
  while ($s = $sth->fetchrow_hashref){
   foreach("ext_name", "sn", "pn", "description", "customer", "cust_city",
@@ -431,7 +510,7 @@ LONG
   $out .= "<!-- <td class=bot>$s->{begin_supp}</td>";
   $out .= "<td class=bot>$s->{end_supp}</td> --></tr>\n";
  }
- $out .= "</table>\n";
+ $out .= "</tbody></table>\n";
  return $out;
 }
 
@@ -933,7 +1012,7 @@ CASE
   <td class=bb_thin><b>$s->{sn}, $s->{pn}</b><br>
         $s->{description}</td></tr>
 <tr><th class=bb_thin>Неисправность</th>
-  <td class=bb_thin>$s->{message}</td></tr>
+  <td class=bb_thin><pre>$s->{message}</pre></td></tr>
 <tr><th class=bb_thin>Дата Создания</th>
   <td class=bb_thin>$s->{created_at}</td></tr>
 <tr><th class=bb_thin>Последнее изменение</th>
