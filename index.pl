@@ -530,7 +530,7 @@ SELECT t1.sn, t1.id, cust_name, cust_city, cust_city, sla, begin_supp,
        end_supp, description,
        (begin_supp,end_supp) overlaps (now(),now()) AS in_range
   FROM contract_base t1
-  LEFT JOIN sn_to_customer t2 USING (sn)
+  LEFT JOIN sn_to_customer_old t2 USING (sn)
   WHERE sn ilike $likes $cust_rest
 SNSEL
   $sth = &sql_exec($q);
@@ -582,7 +582,7 @@ INSERT INTO sd_cases (user_id, sn, customer_id, sla, ext_name)
 SELECT $user_data{id} AS user_id, t1.sn, t2.id as customer_id, sla,
        $ext_n AS ext_name
   FROM contract_base t1
-  LEFT JOIN sn_to_customer t2 USING (sn)
+  LEFT JOIN sn_to_customer_old t2 USING (sn)
  WHERE t1.sn = $qname
 RETURNING id;
 CREAT
@@ -927,6 +927,7 @@ SET01
   else{ $sf = "" }
  }
  if($sf ne ""){
+  $form_data{textmsg} =~ s/\'/\'\'/gm;
   $sf = "'" . $sf . "'"; $textval = "'" . $form_data{textmsg} . "'";
   $q =<<SET02;
 SELECT * FROM status_change($user_data{id}, $form_data{case_id},
@@ -1001,6 +1002,7 @@ CASE
    }
    my $sla_col = "bb_thin";
    if($s->{sla} =~ /CTR/){ $sla_col = "'bb_thin bb_red'" };
+   $s->{message} =~ s/(.{1,110})\s+/$1\n/g;
    $out =<<CASE_DET;
 <details open><summary>Детали по заявке $s->{case_name}</summary>
 <table width=98%>
