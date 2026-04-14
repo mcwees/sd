@@ -833,7 +833,8 @@ sub getnextstatus(){
  }
  $qstat = "'" . $qstat . "'";
  $q =<<GETNEXT;
-SELECT next_status, next_desc, t1.need_msg, t1.layer FROM nextstatusfull t1
+SELECT next_status, next_desc, t1.need_msg, t1.layer
+ FROM nextstatusfull t1
  LEFT JOIN case_statuses ON next_status = status
  WHERE current_status = $qstat $cust_can
 GETNEXT
@@ -1077,7 +1078,7 @@ STATUS
   }
   $out .= "</table></details><br>$next_st\n";
   }else{
-   $out = "<p>Case $form_data{case_id} not accessible</p>";
+   $out = "<p>Case $form_data{case_id} is not acessible</p>";
   }
  }else{
   $out = "<p>Parameter case_id not defined</p>";
